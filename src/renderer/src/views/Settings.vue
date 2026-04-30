@@ -1,73 +1,251 @@
+<script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
+import { configApi, dialogApi, storeApi, systemApi } from '../api/media'
+import { useDialog } from '../composables/useDialog'
+
+type ProviderId = 'ark' | 'google' | 'bailian' | 'openrouter' | 'minimax' | 'vidu' | 'fal'
+
+const PROVIDERS: Array<{
+  id: ProviderId
+  name: string
+  text: boolean
+  image: boolean
+  video: boolean
+  models: { text?: string[]; image?: string[]; video?: string[] }
+}> = [
+  { id: 'ark', name: 'VolcEngine Ark', text: true, image: true, video: true, models: { text: ['doubao-seed-2-0-lite-260215'], image: ['doubao-seedream-5-0-260128'], video: ['doubao-seedance-1-0-pro-fast-251015', 'doubao-seedance-1-5-pro-251215'] } },
+  { id: 'google', name: 'Google AI Studio', text: true, image: true, video: true, models: { text: ['gemini-3-pro-preview'], image: ['gemini-3-pro-image-preview'], video: ['veo-3.1-generate-preview'] } },
+  { id: 'bailian', name: 'Alibaba Bailian', text: true, image: false, video: true, models: { text: ['qwen-plus'], video: ['wan2.5-i2v-preview'] } },
+  { id: 'openrouter', name: 'OpenRouter', text: true, image: false, video: false, models: { text: ['openai/gpt-5.1'] } },
+  { id: 'minimax', name: 'MiniMax', text: true, image: false, video: true, models: { text: ['MiniMax-M2.5'], video: ['minimax/hailuo-02'] } },
+  { id: 'vidu', name: 'Vidu', text: false, image: false, video: true, models: { video: ['vidu-2.0'] } },
+  { id: 'fal', name: 'FAL', text: false, image: true, video: true, models: { image: ['fal-ai/nano-banana-pro'], video: ['fal-ai/veo3'] } }
+]
+
+const outputDir = ref('')
+const dialog = useDialog()
+const isLoading = ref(true)
+const isSaving = ref(false)
+const hasChanges = ref(false)
+const currentTheme = ref('dark')
+
+const selectedKeyProvider = ref<ProviderId>('ark')
+const apiKeys = ref<Record<string, string>>({})
+const showApiKey = ref(false)
+const isValidating = ref(false)
+const validationResult = ref<{ valid: boolean; error?: string } | null>(null)
+
+const defaultTextProvider = ref<ProviderId>('ark')
+const defaultImageProvider = ref<ProviderId>('ark')
+const defaultVideoProvider = ref<ProviderId>('ark')
+const defaultTextModel = ref('doubao-seed-2-0-lite-260215')
+const defaultImageModel = ref('doubao-seedream-5-0-260128')
+const defaultVideoModel = ref('doubao-seedance-1-0-pro-fast-251015')
+
+const selectedProvider = computed(() => PROVIDERS.find(provider => provider.id === selectedKeyProvider.value) || PROVIDERS[0])
+const textProviders = computed(() => PROVIDERS.filter(provider => provider.text))
+const imageProviders = computed(() => PROVIDERS.filter(provider => provider.image))
+const videoProviders = computed(() => PROVIDERS.filter(provider => provider.video))
+const textModels = computed(() => PROVIDERS.find(provider => provider.id === defaultTextProvider.value)?.models.text || [])
+const imageModels = computed(() => PROVIDERS.find(provider => provider.id === defaultImageProvider.value)?.models.image || [])
+const videoModels = computed(() => PROVIDERS.find(provider => provider.id === defaultVideoProvider.value)?.models.video || [])
+
+const activeApiKey = computed({
+  get: () => apiKeys.value[selectedKeyProvider.value] || '',
+  set: (value: string) => {
+    apiKeys.value = { ...apiKeys.value, [selectedKeyProvider.value]: value }
+    validationResult.value = null
+    hasChanges.value = true
+  }
+})
+
+const getDefaultOutputDir = () => 'C:\\Users\\Public\\Documents\\Cinecho\\Assets'
+
+const ensureModelForProvider = () => {
+  if (!textModels.value.includes(defaultTextModel.value)) defaultTextModel.value = textModels.value[0] || ''
+  if (!imageModels.value.includes(defaultImageModel.value)) defaultImageModel.value = imageModels.value[0] || ''
+  if (!videoModels.value.includes(defaultVideoModel.value)) defaultVideoModel.value = videoModels.value[0] || ''
+}
+
+const loadSettings = async () => {
+  isLoading.value = true
+  try {
+    const data = await storeApi.get()
+    const settings = data.settings || {}
+    outputDir.value = settings.outputDir || getDefaultOutputDir()
+    apiKeys.value = { ...(settings.apiKeys || {}) }
+    if (settings.apiKey && !apiKeys.value.ark) apiKeys.value.ark = settings.apiKey
+    defaultTextProvider.value = settings.defaultTextProvider || 'ark'
+    defaultImageProvider.value = settings.defaultImageProvider || 'ark'
+    defaultVideoProvider.value = settings.defaultVideoProvider || 'ark'
+    defaultTextModel.value = settings.defaultTextModel || 'doubao-seed-2-0-lite-260215'
+    defaultImageModel.value = settings.defaultImageModel || 'doubao-seedream-5-0-260128'
+    defaultVideoModel.value = settings.defaultVideoModel || 'doubao-seedance-1-0-pro-fast-251015'
+    currentTheme.value = settings.theme || 'dark'
+    ensureModelForProvider()
+    hasChanges.value = false
+  } finally {
+    isLoading.value = false
+  }
+}
+
+const handleSelectDirectory = async () => {
+  const dir = await dialogApi.selectDirectory()
+  if (dir) {
+    outputDir.value = dir
+    hasChanges.value = true
+    await handleSave(false)
+  }
+}
+
+const handleOpenDirectory = async () => {
+  if (outputDir.value) await systemApi.openDirectory(outputDir.value)
+}
+
+const handleThemeChange = (theme: string) => {
+  currentTheme.value = theme
+  hasChanges.value = true
+  window.dispatchEvent(new CustomEvent('theme-change', { detail: theme }))
+  void handleSave(false)
+}
+
+const handleProviderChange = () => {
+  ensureModelForProvider()
+  hasChanges.value = true
+  void handleSave(false)
+}
+
+const handlePasteApiKey = async () => {
+  const text = await navigator.clipboard.readText()
+  if (text) activeApiKey.value = text.trim()
+}
+
+const validateApiKey = async () => {
+  if (!activeApiKey.value.trim()) {
+    validationResult.value = { valid: false, error: '请输入 API Key' }
+    return
+  }
+  isValidating.value = true
+  validationResult.value = null
+  try {
+    const result = await configApi.validateKey({ provider: selectedKeyProvider.value, apiKey: activeApiKey.value.trim() })
+    validationResult.value = result
+    if (result.valid) await handleSave(false)
+  } finally {
+    isValidating.value = false
+  }
+}
+
+const handleSave = async (showAlert = true) => {
+  isSaving.value = true
+  try {
+    ensureModelForProvider()
+    await storeApi.updateSetting({
+      outputDir: outputDir.value,
+      theme: currentTheme.value,
+      apiKeys: apiKeys.value,
+      apiKey: apiKeys.value.ark || '',
+      defaultTextProvider: defaultTextProvider.value,
+      defaultImageProvider: defaultImageProvider.value,
+      defaultVideoProvider: defaultVideoProvider.value,
+      defaultTextModel: defaultTextModel.value,
+      defaultImageModel: defaultImageModel.value,
+      defaultVideoModel: defaultVideoModel.value
+    })
+    hasChanges.value = false
+  } catch (error) {
+    console.error('Failed to save settings:', error)
+    if (showAlert) await dialog.error('保存设置失败')
+  } finally {
+    isSaving.value = false
+  }
+}
+
+onMounted(loadSettings)
+</script>
+
 <template>
-  <div class="p-8 max-w-3xl mx-auto h-full flex flex-col">
-    <header class="mb-10">
-      <h2 class="text-3xl font-bold bg-gradient-to-r from-zinc-900 to-zinc-600 bg-clip-text text-transparent">Settings</h2>
-      <p class="text-zinc-500 mt-2">Configure API credentials and application preferences.</p>
-    </header>
+  <div class="h-full overflow-auto p-8" style="background-color: var(--bg-primary); color: var(--text-primary);">
+    <div class="mx-auto max-w-5xl space-y-6">
+      <header>
+        <h2 class="text-3xl font-bold">Settings</h2>
+        <p class="mt-2 text-sm" style="color: var(--text-secondary);">Configure storage, providers, and generation defaults.</p>
+      </header>
 
-    <div class="space-y-8 flex-1">
-      <section class="space-y-4 bg-white border border-zinc-200 rounded-2xl p-6 relative overflow-hidden group shadow-sm">
-        <div class="absolute inset-0 bg-gradient-to-br from-indigo-500/5 to-purple-600/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-        <h3 class="text-lg font-semibold text-zinc-900 flex items-center gap-2 relative z-10">
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-indigo-500"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-          VolcEngine API Credentials
-        </h3>
-        
-        <div class="space-y-4 relative z-10">
-          <div>
-            <label class="block text-sm font-medium text-zinc-500 mb-1.5">Access Key</label>
-            <input type="password" placeholder="AKLT****************" class="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-2.5 text-zinc-900 placeholder-zinc-300 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all font-mono text-sm" />
+      <section class="rounded-xl p-5 space-y-4" style="background-color: var(--bg-card); border: 1px solid var(--border-color);">
+        <h3 class="text-lg font-semibold">Storage</h3>
+        <div class="flex gap-2">
+          <input :value="outputDir" readonly class="flex-1 rounded-lg px-3 py-2 font-mono text-sm" style="background-color: var(--bg-secondary); border: 1px solid var(--border-color);" />
+          <button class="px-4 py-2 rounded-lg border" style="border-color: var(--border-color);" @click="handleSelectDirectory">Browse</button>
+          <button class="px-4 py-2 rounded-lg border" style="border-color: var(--border-color);" @click="handleOpenDirectory">Open</button>
+        </div>
+        <div class="grid grid-cols-5 gap-2 text-xs font-mono">
+          <div v-for="name in ['roles', 'costumes', 'scenes', 'storyboards', 'videos']" :key="name" class="rounded-md px-3 py-2" style="background-color: var(--bg-secondary); border: 1px solid var(--border-color);">{{ name }}</div>
+        </div>
+      </section>
+
+      <section class="rounded-xl p-5 space-y-4" style="background-color: var(--bg-card); border: 1px solid var(--border-color);">
+        <h3 class="text-lg font-semibold">API Credentials</h3>
+        <div class="grid grid-cols-1 md:grid-cols-[220px_1fr_auto] gap-3">
+          <select v-model="selectedKeyProvider" class="rounded-lg px-3 py-2" style="background-color: var(--bg-secondary); border: 1px solid var(--border-color);">
+            <option v-for="provider in PROVIDERS" :key="provider.id" :value="provider.id">{{ provider.name }}</option>
+          </select>
+          <div class="relative">
+            <input v-model="activeApiKey" :type="showApiKey ? 'text' : 'password'" class="w-full rounded-lg px-3 py-2 pr-20 font-mono text-sm" style="background-color: var(--bg-secondary); border: 1px solid var(--border-color);" :placeholder="`${selectedProvider.name} API Key`" />
+            <div class="absolute right-2 top-1/2 -translate-y-1/2 flex gap-1">
+              <button class="px-2 py-1 text-xs rounded" @click="handlePasteApiKey">Paste</button>
+              <button class="px-2 py-1 text-xs rounded" @click="showApiKey = !showApiKey">{{ showApiKey ? 'Hide' : 'Show' }}</button>
+            </div>
           </div>
-          <div>
-            <label class="block text-sm font-medium text-zinc-500 mb-1.5">Secret Key</label>
-            <input type="password" placeholder="********************************" class="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-2.5 text-zinc-900 placeholder-zinc-300 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all font-mono text-sm" />
+          <button class="px-4 py-2 rounded-lg text-white" style="background-color: var(--accent-color);" :disabled="isValidating" @click="validateApiKey">
+            {{ isValidating ? 'Testing...' : 'Test & Save' }}
+          </button>
+        </div>
+        <p v-if="validationResult" class="text-sm" :style="{ color: validationResult.valid ? '#22c55e' : '#ef4444' }">
+          {{ validationResult.valid ? 'API Key 验证成功' : validationResult.error }}
+        </p>
+      </section>
+
+      <section class="rounded-xl p-5 space-y-4" style="background-color: var(--bg-card); border: 1px solid var(--border-color);">
+        <h3 class="text-lg font-semibold">Default Providers</h3>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="space-y-2">
+            <label class="text-xs font-bold" style="color: var(--text-tertiary);">Text Optimization</label>
+            <select v-model="defaultTextProvider" class="w-full rounded-lg px-3 py-2" style="background-color: var(--bg-secondary); border: 1px solid var(--border-color);" @change="handleProviderChange">
+              <option v-for="provider in textProviders" :key="provider.id" :value="provider.id">{{ provider.name }}</option>
+            </select>
+            <select v-model="defaultTextModel" class="w-full rounded-lg px-3 py-2" style="background-color: var(--bg-secondary); border: 1px solid var(--border-color);" @change="handleSave(false)">
+              <option v-for="model in textModels" :key="model" :value="model">{{ model }}</option>
+            </select>
+          </div>
+          <div class="space-y-2">
+            <label class="text-xs font-bold" style="color: var(--text-tertiary);">Image / Storyboard</label>
+            <select v-model="defaultImageProvider" class="w-full rounded-lg px-3 py-2" style="background-color: var(--bg-secondary); border: 1px solid var(--border-color);" @change="handleProviderChange">
+              <option v-for="provider in imageProviders" :key="provider.id" :value="provider.id">{{ provider.name }}</option>
+            </select>
+            <select v-model="defaultImageModel" class="w-full rounded-lg px-3 py-2" style="background-color: var(--bg-secondary); border: 1px solid var(--border-color);" @change="handleSave(false)">
+              <option v-for="model in imageModels" :key="model" :value="model">{{ model }}</option>
+            </select>
+          </div>
+          <div class="space-y-2">
+            <label class="text-xs font-bold" style="color: var(--text-tertiary);">Video Generation</label>
+            <select v-model="defaultVideoProvider" class="w-full rounded-lg px-3 py-2" style="background-color: var(--bg-secondary); border: 1px solid var(--border-color);" @change="handleProviderChange">
+              <option v-for="provider in videoProviders" :key="provider.id" :value="provider.id">{{ provider.name }}</option>
+            </select>
+            <select v-model="defaultVideoModel" class="w-full rounded-lg px-3 py-2" style="background-color: var(--bg-secondary); border: 1px solid var(--border-color);" @change="handleSave(false)">
+              <option v-for="model in videoModels" :key="model" :value="model">{{ model }}</option>
+            </select>
           </div>
         </div>
       </section>
 
-      <section class="space-y-4 bg-white border border-zinc-200 rounded-2xl p-6 shadow-sm">
-        <h3 class="text-lg font-semibold text-zinc-900 flex items-center gap-2">
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-amber-500"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-          Storage Configuration
-        </h3>
-        
-        <div>
-          <label class="block text-sm font-medium text-zinc-500 mb-1.5">Output Directory</label>
-          <div class="flex gap-2">
-            <input type="text" readonly value="D:\Cinecho\Outputs" class="flex-1 bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-2.5 text-zinc-600 focus:outline-none cursor-default font-mono text-sm" />
-            <button class="px-4 py-2.5 bg-white hover:bg-zinc-50 text-zinc-700 rounded-lg font-medium transition-all border border-zinc-200 whitespace-nowrap shadow-sm">
-              Browse
-            </button>
-          </div>
+      <section class="rounded-xl p-5 space-y-4" style="background-color: var(--bg-card); border: 1px solid var(--border-color);">
+        <h3 class="text-lg font-semibold">Appearance</h3>
+        <div class="flex gap-2">
+          <button class="flex-1 rounded-lg border py-2" :style="currentTheme === 'dark' ? 'background-color: rgba(96,165,250,.14); border-color: var(--accent-color);' : 'border-color: var(--border-color);'" @click="handleThemeChange('dark')">Dark</button>
+          <button class="flex-1 rounded-lg border py-2" :style="currentTheme === 'light' ? 'background-color: rgba(96,165,250,.14); border-color: var(--accent-color);' : 'border-color: var(--border-color);'" @click="handleThemeChange('light')">Light</button>
         </div>
       </section>
-
-      <section class="space-y-4 bg-white border border-zinc-200 rounded-2xl p-6 shadow-sm">
-        <h3 class="text-lg font-semibold text-zinc-900 flex items-center gap-2">
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-sky-500"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-          Appearance
-        </h3>
-        
-        <div>
-          <label class="block text-sm font-medium text-zinc-500 mb-2">Theme Preference</label>
-          <div class="flex gap-2">
-            <button class="flex-1 py-2.5 rounded-lg border border-zinc-200 bg-zinc-50 hover:bg-zinc-100 text-zinc-500 hover:text-zinc-700 font-medium text-sm flex justify-center items-center gap-2 transition-all">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-              Dark Theme
-            </button>
-            <button class="flex-1 py-2.5 rounded-lg border border-zinc-200 bg-zinc-900 text-white font-medium text-sm flex justify-center items-center gap-2 disabled:opacity-100 disabled:cursor-default shadow-lg shadow-zinc-200" disabled>
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-              Light Theme
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <div class="pt-6 flex justify-end">
-        <button class="px-6 py-2.5 rounded-lg bg-zinc-900 hover:bg-black text-white font-semibold transition-all shadow-lg shadow-zinc-200 text-sm">
-          Save Changes
-        </button>
-      </div>
     </div>
   </div>
 </template>

@@ -7,8 +7,60 @@
     color-scheme: light;
   }
   
+  /* Light Theme (默认) */
+  :root,
+  [data-theme="light"] {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f4f4f5;
+    --bg-tertiary: #e4e4e7;
+    --bg-card: #ffffff;
+    --border-color: #e4e4e7;
+    --text-primary: #18181b;
+    --text-secondary: #52525b;
+    --text-tertiary: #a1a1aa;
+    --accent-color: #6366f1;
+    --accent-hover: #4f46e5;
+    --header-bg: rgba(255, 255, 255, 0.85);
+    --nav-bg: rgba(255, 255, 255, 0.85);
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    color-scheme: light;
+  }
+  
+  /* Dark Theme */
+  [data-theme="dark"] {
+    --bg-primary: #0c0c0e;
+    --bg-secondary: #141417;
+    --bg-tertiary: #1a1a1d;
+    --bg-card: #18181b;
+    --border-color: #27272a;
+    --text-primary: #fafafa;
+    --text-secondary: #a1a1aa;
+    --text-tertiary: #71717a;
+    --accent-color: #818cf8;
+    --accent-hover: #6366f1;
+    --header-bg: rgba(20, 20, 23, 0.85);
+    --nav-bg: rgba(20, 20, 23, 0.85);
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    color-scheme: dark;
+  }
+  
   html, body {
-    @apply antialiased h-full w-full bg-zinc-50 text-zinc-950;
+    @apply antialiased h-full w-full;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+  }
+
+  /* 确保表单元素在不同主题下正确使用变量 */
+  input, textarea, select {
+    background-color: var(--bg-card);
+    color: var(--text-primary);
+    border-color: var(--border-color);
+  }
+  
+  input::placeholder, textarea::placeholder {
+    color: var(--text-tertiary);
   }
 }
 
