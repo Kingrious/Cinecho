@@ -80,6 +80,14 @@ export interface ElectronAPI {
   system: {
     openDirectory: (dirPath: string) => Promise<void>
   }
+  windowControls: {
+    minimize: () => Promise<void>
+    maximize: () => Promise<boolean>
+    unmaximize: () => Promise<boolean>
+    toggleMaximize: () => Promise<boolean>
+    isMaximized: () => Promise<boolean>
+    close: () => Promise<void>
+  }
   stitch: {
     scanVideos: (outputDir?: string) => Promise<VideoMeta[]>
     importVideos: () => Promise<VideoMeta[] | null>
@@ -88,6 +96,7 @@ export interface ElectronAPI {
     revealExport: (filePath: string) => Promise<void>
   }
   onStitchProgress: (callback: (data: { percent: number; currentTime: number }) => void) => () => void
+  onWindowMaximizedChange: (callback: (isMaximized: boolean) => void) => () => void
 }
 
 declare global {
@@ -166,6 +175,14 @@ const bridgeApi: ElectronAPI = {
   system: {
     openDirectory: (dirPath) => bridgeRequest<void>('/system/openDirectory', { dirPath })
   },
+  windowControls: {
+    minimize: () => unsupported<void>('窗口最小化'),
+    maximize: () => unsupported<boolean>('窗口最大化'),
+    unmaximize: () => unsupported<boolean>('窗口还原'),
+    toggleMaximize: () => unsupported<boolean>('窗口最大化切换'),
+    isMaximized: () => Promise.resolve(false),
+    close: () => unsupported<void>('关闭窗口')
+  },
   stitch: {
     scanVideos: (outputDir) => bridgeRequest<VideoMeta[]>('/stitch/scanVideos', { outputDir }),
     importVideos: () => unsupported<VideoMeta[] | null>('导入本地视频'),
@@ -173,7 +190,8 @@ const bridgeApi: ElectronAPI = {
     exportVideo: (options) => bridgeRequest<StitchExportResult>('/stitch/exportVideo', options),
     revealExport: (filePath) => bridgeRequest<void>('/stitch/revealExport', { filePath })
   },
-  onStitchProgress: () => () => {}
+  onStitchProgress: () => () => {},
+  onWindowMaximizedChange: () => () => {}
 }
 
 export function getApi(): ElectronAPI {
@@ -221,6 +239,16 @@ export const configApi = {
 
 export const systemApi = {
   openDirectory: (dirPath: string): Promise<void> => getApi().system.openDirectory(dirPath)
+}
+
+export const windowApi = {
+  minimize: (): Promise<void> => getApi().windowControls.minimize(),
+  maximize: (): Promise<boolean> => getApi().windowControls.maximize(),
+  unmaximize: (): Promise<boolean> => getApi().windowControls.unmaximize(),
+  toggleMaximize: (): Promise<boolean> => getApi().windowControls.toggleMaximize(),
+  isMaximized: (): Promise<boolean> => getApi().windowControls.isMaximized(),
+  close: (): Promise<void> => getApi().windowControls.close(),
+  onMaximizedChange: (callback: (isMaximized: boolean) => void) => getApi().onWindowMaximizedChange(callback)
 }
 
 export const storyboardApi = {

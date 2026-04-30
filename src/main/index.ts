@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell, Menu } from 'electron'
 import { join, extname, basename, resolve, relative, isAbsolute } from 'path'
 import { readdir, stat, unlink, writeFile, mkdir, readFile, rm, rename } from 'fs/promises'
 import { pathToFileURL } from 'url'
@@ -44,6 +44,8 @@ function createWindow() {
   const mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    frame: false,
+    autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
@@ -57,6 +59,14 @@ function createWindow() {
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
+
+  mainWindow.on('maximize', () => {
+    mainWindow.webContents.send('window:maximized', true)
+  })
+
+  mainWindow.on('unmaximize', () => {
+    mainWindow.webContents.send('window:maximized', false)
+  })
 }
 
 // ─── IPC Handlers ───
@@ -560,6 +570,44 @@ ipcMain.handle('media:openAsset', async (_event, filePath: string) => {
 
 ipcMain.handle('system:openDirectory', async (_event, dirPath: string) => {
   shell.openPath(dirPath)
+})
+
+ipcMain.handle('window:minimize', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (win) win.minimize()
+})
+
+ipcMain.handle('window:maximize', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (win && !win.isMaximized()) win.maximize()
+  return !!win?.isMaximized()
+})
+
+ipcMain.handle('window:unmaximize', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (win && win.isMaximized()) win.unmaximize()
+  return !!win?.isMaximized()
+})
+
+ipcMain.handle('window:toggleMaximize', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win) return false
+  if (win.isMaximized()) {
+    win.unmaximize()
+  } else {
+    win.maximize()
+  }
+  return win.isMaximized()
+})
+
+ipcMain.handle('window:isMaximized', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  return !!win?.isMaximized()
+})
+
+ipcMain.handle('window:close', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (win) win.close()
 })
 
 // ─── API Configuration (用户可配置) ───
@@ -2793,6 +2841,8 @@ async function initializeDirectories() {
 }
 
 app.whenReady().then(async () => {
+  Menu.setApplicationMenu(null)
+
   // 先从 storage 加载用户保存的输出目录设置和 API Key
   try {
     const content = await readFile(STORE_PATH, 'utf-8')

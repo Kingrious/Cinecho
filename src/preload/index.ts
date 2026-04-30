@@ -47,6 +47,15 @@ const api = {
     openDirectory: (dirPath: string) => ipcRenderer.invoke('system:openDirectory', dirPath)
   },
   
+  windowControls: {
+    minimize: () => ipcRenderer.invoke('window:minimize'),
+    maximize: () => ipcRenderer.invoke('window:maximize'),
+    unmaximize: () => ipcRenderer.invoke('window:unmaximize'),
+    toggleMaximize: () => ipcRenderer.invoke('window:toggleMaximize'),
+    isMaximized: () => ipcRenderer.invoke('window:isMaximized'),
+    close: () => ipcRenderer.invoke('window:close')
+  },
+  
   // 任务进度推送监听
   onTaskProgress: (callback: (data: any) => void) => {
     const handler = (_event: any, data: any) => callback(data)
@@ -90,6 +99,12 @@ const api = {
     const handler = (_event: any, data: any) => callback(data)
     ipcRenderer.on('stitch:exportProgress', handler)
     return () => ipcRenderer.removeListener('stitch:exportProgress', handler)
+  },
+
+  onWindowMaximizedChange: (callback: (isMaximized: boolean) => void) => {
+    const handler = (_event: any, isMaximized: boolean) => callback(isMaximized)
+    ipcRenderer.on('window:maximized', handler)
+    return () => ipcRenderer.removeListener('window:maximized', handler)
   }
 }
 
