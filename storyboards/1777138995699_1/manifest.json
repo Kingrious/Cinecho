@@ -1,0 +1,31 @@
+{
+  "id": "1777138995699_1",
+  "name": "1",
+  "path": "D:\\Cinecho\\storyboards\\1777138995699_1",
+  "shotCount": 3,
+  "createdAt": 1777138995699,
+  "modifiedAt": 1777139049320,
+  "shots": [
+    {
+      "index": 1,
+      "status": "ready",
+      "prompt": "在里面跳舞",
+      "roleAssetPath": "D:\\Cinecho\\roles\\性感美女_1.png",
+      "sceneAssetPath": "D:\\Cinecho\\scenes\\雨夜小树林2.png",
+      "imagePath": "D:\\Cinecho\\storyboards\\1777138995699_1\\shot_01.png",
+      "imageUrl": "file:///D:/Cinecho/storyboards/1777138995699_1/shot_01.png",
+      "thumbnail": "file:///D:/Cinecho/storyboards/1777138995699_1/shot_01.png",
+      "updatedAt": 1777139049320
+    },
+    {
+      "index": 2,
+      "status": "generating",
+      "prompt": ""
+    },
+    {
+      "index": 3,
+      "status": "generating",
+      "prompt": ""
+    }
+  ]
+}

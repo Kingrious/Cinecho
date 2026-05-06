@@ -1,0 +1,62 @@
+{
+  "id": "1777221857445_3",
+  "name": "3",
+  "path": "D:\\Cinecho\\storyboards\\1777221857445_3",
+  "shotCount": 3,
+  "createdAt": 1777221857446,
+  "modifiedAt": 1777486839885,
+  "shots": [
+    {
+      "index": 1,
+      "status": "ready",
+      "prompt": "这个角色穿这个服饰正面对着镜头",
+      "roleAssetPaths": [
+        "D:\\Cinecho\\roles\\性感美女.png"
+      ],
+      "costumeAssetPaths": [
+        "D:\\Cinecho\\costumes\\Obsidian Operative_3.png"
+      ],
+      "sceneAssetPaths": [
+        "D:\\Cinecho\\scenes\\雨夜小树林2.png"
+      ],
+      "sourceImageUrl": "https://ark-acg-cn-beijing.tos-cn-beijing.volces.com/doubao-seedream-5-0/021777222016277bec3f42aa889c5b9258a8a5e9d4b8deaaa1634_0.jpeg?X-Tos-Algorithm=TOS4-HMAC-SHA256&X-Tos-Credential=AKLTYWJkZTExNjA1ZDUyNDc3YzhjNTM5OGIyNjBhNDcyOTQ%2F20260426%2Fcn-beijing%2Ftos%2Frequest&X-Tos-Date=20260426T164724Z&X-Tos-Expires=86400&X-Tos-Signature=aba0d632df8e391ab09c010d0fabb88898e414e01115acb53ff79212c9ca1857&X-Tos-SignedHeaders=host",
+      "roleAssetPath": "D:\\Cinecho\\roles\\性感美女.png",
+      "costumeAssetPath": "D:\\Cinecho\\costumes\\Obsidian Operative_3.png",
+      "sceneAssetPath": "D:\\Cinecho\\scenes\\雨夜小树林2.png",
+      "imagePath": "D:\\Cinecho\\storyboards\\1777221857445_3\\shot_01.png",
+      "imageUrl": "https://ark-acg-cn-beijing.tos-cn-beijing.volces.com/doubao-seedream-5-0/021777222016277bec3f42aa889c5b9258a8a5e9d4b8deaaa1634_0.jpeg?X-Tos-Algorithm=TOS4-HMAC-SHA256&X-Tos-Credential=AKLTYWJkZTExNjA1ZDUyNDc3YzhjNTM5OGIyNjBhNDcyOTQ%2F20260426%2Fcn-beijing%2Ftos%2Frequest&X-Tos-Date=20260426T164724Z&X-Tos-Expires=86400&X-Tos-Signature=aba0d632df8e391ab09c010d0fabb88898e414e01115acb53ff79212c9ca1857&X-Tos-SignedHeaders=host",
+      "thumbnail": "file:///D:/Cinecho/storyboards/1777221857445_3/shot_01.png",
+      "updatedAt": 1777221917878
+    },
+    {
+      "index": 2,
+      "status": "ready",
+      "prompt": "这个角色穿这个服饰背面对着镜头",
+      "roleAssetPaths": [
+        "D:\\Cinecho\\roles\\性感美女.png"
+      ],
+      "costumeAssetPaths": [
+        "D:\\Cinecho\\costumes\\Obsidian Operative_3.png"
+      ],
+      "sceneAssetPaths": [
+        "D:\\Cinecho\\scenes\\雨夜小树林2.png"
+      ],
+      "sourceImageUrl": "https://ark-acg-cn-beijing.tos-cn-beijing.volces.com/doubao-seedream-5-0/021777486934362e3c0010419774ef230e4bef6206f93665a6b3a_0.jpeg?X-Tos-Algorithm=TOS4-HMAC-SHA256&X-Tos-Credential=AKLTYWJkZTExNjA1ZDUyNDc3YzhjNTM5OGIyNjBhNDcyOTQ%2F20260429%2Fcn-beijing%2Ftos%2Frequest&X-Tos-Date=20260429T182247Z&X-Tos-Expires=86400&X-Tos-Signature=d0e1c7903d90ca9c9752014999722bb7080385023a6f0bcc5d0fee0066657e97&X-Tos-SignedHeaders=host",
+      "roleAssetPath": "D:\\Cinecho\\roles\\性感美女.png",
+      "costumeAssetPath": "D:\\Cinecho\\costumes\\Obsidian Operative_3.png",
+      "sceneAssetPath": "D:\\Cinecho\\scenes\\雨夜小树林2.png",
+      "imagePath": "D:\\Cinecho\\storyboards\\1777221857445_3\\shot_02.png",
+      "imageUrl": "https://ark-acg-cn-beijing.tos-cn-beijing.volces.com/doubao-seedream-5-0/021777486934362e3c0010419774ef230e4bef6206f93665a6b3a_0.jpeg?X-Tos-Algorithm=TOS4-HMAC-SHA256&X-Tos-Credential=AKLTYWJkZTExNjA1ZDUyNDc3YzhjNTM5OGIyNjBhNDcyOTQ%2F20260429%2Fcn-beijing%2Ftos%2Frequest&X-Tos-Date=20260429T182247Z&X-Tos-Expires=86400&X-Tos-Signature=d0e1c7903d90ca9c9752014999722bb7080385023a6f0bcc5d0fee0066657e97&X-Tos-SignedHeaders=host",
+      "thumbnail": "file:///D:/Cinecho/storyboards/1777221857445_3/shot_02.png",
+      "updatedAt": 1777486839885
+    },
+    {
+      "index": 3,
+      "status": "generating",
+      "prompt": "",
+      "roleAssetPaths": [],
+      "costumeAssetPaths": [],
+      "sceneAssetPaths": []
+    }
+  ]
+}

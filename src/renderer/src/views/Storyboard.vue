@@ -1,406 +1,367 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { Search, X } from 'lucide-vue-next'
-import { mediaApi, storyboardApi } from '../api/media'
-import { useDialog } from '../composables/useDialog'
-import type { MediaAsset, StoryboardAsset } from '../types/media'
+import {
+  ChevronDown,
+  GripVertical,
+  ImagePlus,
+  Plus,
+  Trash2
+} from 'lucide-vue-next'
 
-type AssetBucket = 'role' | 'costume' | 'scene'
-
-const dialog = useDialog()
-const storyboards = ref<StoryboardAsset[]>([])
-const selectedStoryboard = ref<StoryboardAsset | null>(null)
-const assets = ref<MediaAsset[]>([])
-const outputDir = ref('')
-const isLoading = ref(false)
-const isCreating = ref(false)
-const isGenerating = ref(false)
-
-const newStoryboardName = ref('')
-const newShotCount = ref(3)
-const storyboardSearchQuery = ref('')
-const currentShotIndex = ref(1)
-const shotPrompt = ref('')
-const selectedRolePaths = ref<string[]>([])
-const selectedCostumePaths = ref<string[]>([])
-const selectedScenePaths = ref<string[]>([])
-const pickerType = ref<AssetBucket | null>(null)
-
-const MAX_REFERENCE_ASSETS = 5
-
-const roleAssets = computed(() => assets.value.filter(asset => asset.type === 'role'))
-const costumeAssets = computed(() => assets.value.filter(asset => asset.type === 'costume'))
-const sceneAssets = computed(() => assets.value.filter(asset => asset.type === 'scene'))
-const currentShot = computed(() => selectedStoryboard.value?.shots.find(shot => shot.index === currentShotIndex.value))
-const selectedTotal = computed(() => selectedRolePaths.value.length + selectedCostumePaths.value.length + selectedScenePaths.value.length)
-const filteredStoryboards = computed(() => {
-  const query = storyboardSearchQuery.value.trim().toLowerCase()
-  if (!query) return storyboards.value
-  return storyboards.value.filter(storyboard => storyboard.name.toLowerCase().includes(query))
-})
-
-const formatDate = (timestamp: number) => new Date(timestamp).toLocaleString('zh-CN', {
-  month: 'short',
-  day: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit'
-})
-
-const assetNameFromPath = (assetPath: string) => assetPath.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') || assetPath
-
-const assetListFor = (type: AssetBucket) => {
-  if (type === 'role') return roleAssets.value
-  if (type === 'costume') return costumeAssets.value
-  return sceneAssets.value
+type ShotRow = {
+  id: number
+  no: number
+  content: string
+  lens: string
+  move: string
+  actor: string
 }
 
-const selectedPathsFor = (type: AssetBucket) => {
-  if (type === 'role') return selectedRolePaths.value
-  if (type === 'costume') return selectedCostumePaths.value
-  return selectedScenePaths.value
-}
-
-const setSelectedPathsFor = (type: AssetBucket, value: string[]) => {
-  if (type === 'role') selectedRolePaths.value = value
-  else if (type === 'costume') selectedCostumePaths.value = value
-  else selectedScenePaths.value = value
-}
-
-const selectedAssetsFor = (type: AssetBucket) => {
-  const source = assetListFor(type)
-  return selectedPathsFor(type).map(assetPath => {
-    const asset = source.find(item => item.path === assetPath)
-    return asset || {
-      id: assetPath,
-      name: assetNameFromPath(assetPath),
-      path: assetPath,
-      type,
-      thumbnail: '',
-      size: 0,
-      createdAt: 0,
-      modifiedAt: 0,
-      status: 'ready' as const
-    }
-  })
-}
-
-const pickerAssets = computed(() => pickerType.value ? assetListFor(pickerType.value) : [])
-const pickerTitle = computed(() => {
-  if (pickerType.value === 'role') return '选择角色资产'
-  if (pickerType.value === 'costume') return '选择服饰资产'
-  if (pickerType.value === 'scene') return '选择场景资产'
-  return '选择资产'
-})
-
-const loadAll = async () => {
-  isLoading.value = true
-  try {
-    outputDir.value = await mediaApi.getOutputDirectory()
-    const [assetList, storyboardList] = await Promise.all([
-      mediaApi.scanDirectory(outputDir.value),
-      storyboardApi.scan()
-    ])
-    assets.value = assetList.filter(asset => asset.type === 'role' || asset.type === 'costume' || asset.type === 'scene')
-    storyboards.value = storyboardList
-    if (selectedStoryboard.value) {
-      const refreshed = storyboardList.find(item => item.id === selectedStoryboard.value?.id)
-      selectedStoryboard.value = refreshed || null
-    }
-  } finally {
-    isLoading.value = false
-  }
-}
-
-const createStoryboard = async () => {
-  if (!newStoryboardName.value.trim()) {
-    await dialog.error('请输入分镜头名称。')
-    return
-  }
-  isCreating.value = true
-  try {
-    const storyboard = await storyboardApi.create({
-      name: newStoryboardName.value.trim(),
-      shotCount: newShotCount.value
-    })
-    storyboards.value.unshift(storyboard)
-    selectedStoryboard.value = storyboard
-    currentShotIndex.value = 1
-    shotPrompt.value = ''
-    selectedRolePaths.value = []
-    selectedCostumePaths.value = []
-    selectedScenePaths.value = []
-    newStoryboardName.value = ''
-  } finally {
-    isCreating.value = false
-  }
-}
-
-const openStoryboard = async (storyboard: StoryboardAsset) => {
-  const fresh = await storyboardApi.get(storyboard.id)
-  selectedStoryboard.value = fresh || storyboard
-  currentShotIndex.value = 1
-  loadShotForm()
-}
-
-const backToList = async () => {
-  selectedStoryboard.value = null
-  await loadAll()
-}
-
-const normalizeShotPaths = (paths?: string[], legacyPath?: string) => {
-  const list = Array.isArray(paths) ? paths.filter(Boolean) : []
-  return list.length ? Array.from(new Set(list)) : legacyPath ? [legacyPath] : []
-}
-
-const loadShotForm = () => {
-  const shot = currentShot.value
-  shotPrompt.value = shot?.prompt || ''
-  selectedRolePaths.value = normalizeShotPaths(shot?.roleAssetPaths, shot?.roleAssetPath)
-  selectedCostumePaths.value = normalizeShotPaths(shot?.costumeAssetPaths, shot?.costumeAssetPath)
-  selectedScenePaths.value = normalizeShotPaths(shot?.sceneAssetPaths, shot?.sceneAssetPath)
-}
-
-const selectShot = (index: number) => {
-  currentShotIndex.value = index
-  loadShotForm()
-}
-
-const handleShotIndexChange = () => {
-  loadShotForm()
-}
-
-const openAssetPicker = (type: AssetBucket) => {
-  pickerType.value = type
-}
-
-const closeAssetPicker = () => {
-  pickerType.value = null
-}
-
-const isSelected = (type: AssetBucket | null, assetPath: string) => type ? selectedPathsFor(type).includes(assetPath) : false
-
-const toggleAsset = async (asset: MediaAsset) => {
-  if (!pickerType.value) return
-  const type = pickerType.value
-  const paths = selectedPathsFor(type)
-  if (paths.includes(asset.path)) {
-    setSelectedPathsFor(type, paths.filter(item => item !== asset.path))
-    return
-  }
-  if (selectedTotal.value >= MAX_REFERENCE_ASSETS) {
-    await dialog.notify(`每张分镜图最多选择 ${MAX_REFERENCE_ASSETS} 张参考资产。`)
-    return
-  }
-  setSelectedPathsFor(type, [...paths, asset.path])
-}
-
-const removeSelectedAsset = (type: AssetBucket, assetPath: string) => {
-  setSelectedPathsFor(type, selectedPathsFor(type).filter(item => item !== assetPath))
-}
-
-const generateCurrentShot = async () => {
-  if (!selectedStoryboard.value) return
-  if (!shotPrompt.value.trim()) {
-    await dialog.error('请输入当前图片的提示词。')
-    return
-  }
-  isGenerating.value = true
-  try {
-    const updated = await storyboardApi.generateShot({
-      storyboardId: selectedStoryboard.value.id,
-      shotIndex: currentShotIndex.value,
-      prompt: shotPrompt.value.trim(),
-      roleAssetPaths: [...selectedRolePaths.value],
-      costumeAssetPaths: [...selectedCostumePaths.value],
-      sceneAssetPaths: [...selectedScenePaths.value]
-    })
-    selectedStoryboard.value = updated
-    const index = storyboards.value.findIndex(item => item.id === updated.id)
-    if (index >= 0) storyboards.value[index] = updated
-    loadShotForm()
-  } catch (error: any) {
-    await dialog.error(error?.message || '生成分镜图片失败。')
-  } finally {
-    isGenerating.value = false
-  }
-}
-
-const deleteStoryboard = async (storyboard: StoryboardAsset) => {
-  const ok = await dialog.confirm(`删除分镜头「${storyboard.name}」？`, '删除分镜头', '删除')
-  if (!ok) return
-  await storyboardApi.delete(storyboard.id)
-  if (selectedStoryboard.value?.id === storyboard.id) selectedStoryboard.value = null
-  await loadAll()
-}
-
-onMounted(loadAll)
+const shots: ShotRow[] = [
+  { id: 1, no: 1, content: '补充镜头内容', lens: '中景', move: '固定', actor: '演员' },
+  { id: 2, no: 2, content: '补充镜头内容', lens: '中景', move: '固定', actor: '演员' },
+  { id: 3, no: 3, content: '补充镜头内容', lens: '中景', move: '固定', actor: '演员' },
+  { id: 4, no: 4, content: '补充镜头内容', lens: '中景', move: '固定', actor: '演员' }
+]
 </script>
 
 <template>
-  <div class="h-full overflow-hidden flex flex-col" style="background-color: var(--bg-primary); color: var(--text-primary);">
-    <header class="h-16 shrink-0 border-b flex items-center justify-between px-8" style="border-color: var(--border-color);">
-      <div>
-        <h2 class="text-xl font-bold">分镜 Storyboard</h2>
-        <p class="text-xs" style="color: var(--text-tertiary);">使用资产库里的角色、服饰、场景生成连续分镜图片</p>
-      </div>
-      <button v-if="selectedStoryboard" class="px-4 py-2 rounded-lg border text-sm" style="border-color: var(--border-color);" @click="backToList">返回列表</button>
-      <button v-else class="px-4 py-2 rounded-lg border text-sm" style="border-color: var(--border-color);" @click="loadAll">刷新</button>
-    </header>
-
-    <main v-if="!selectedStoryboard" class="flex-1 overflow-auto p-8 space-y-6">
-      <section class="rounded-lg p-4 grid grid-cols-1 md:grid-cols-[1fr_160px_auto] gap-3 items-end" style="background-color: var(--bg-card); border: 1px solid var(--border-color);">
-        <div>
-          <label class="block text-xs font-bold mb-1" style="color: var(--text-tertiary);">分镜头名称</label>
-          <input v-model="newStoryboardName" class="w-full rounded-lg px-3 py-2" style="background-color: var(--bg-secondary); border: 1px solid var(--border-color);" placeholder="例如：第一场 夜雨追逐" />
-        </div>
-        <div>
-          <label class="block text-xs font-bold mb-1" style="color: var(--text-tertiary);">图片数量</label>
-          <select v-model.number="newShotCount" class="w-full rounded-lg px-3 py-2" style="background-color: var(--bg-secondary); border: 1px solid var(--border-color);">
-            <option v-for="count in [3,4,5,6,7,8,9]" :key="count" :value="count">{{ count }} 张</option>
-          </select>
-        </div>
-        <button class="px-5 py-2 rounded-lg text-white disabled:opacity-60" style="background-color: var(--accent-color);" :disabled="isCreating" @click="createStoryboard">
-          {{ isCreating ? '创建中...' : '新建分镜' }}
-        </button>
-      </section>
-
-      <section class="flex items-center gap-3">
-        <div class="relative flex-1">
-          <Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 pointer-events-none" style="color: var(--text-tertiary);" />
-          <input v-model="storyboardSearchQuery" class="w-full rounded-lg pl-9 pr-9 py-2 text-sm" style="background-color: var(--bg-card); border: 1px solid var(--border-color);" placeholder="搜索分镜头名称..." />
-          <button v-if="storyboardSearchQuery" class="absolute right-2 top-1/2 h-7 w-7 -translate-y-1/2 rounded-md flex items-center justify-center" style="color: var(--text-tertiary);" title="清空搜索" @click="storyboardSearchQuery = ''">
-            <X class="h-4 w-4" />
-          </button>
-        </div>
-        <span class="rounded-md border px-3 py-2 text-xs whitespace-nowrap" style="border-color: var(--border-color); color: var(--text-tertiary);">
-          {{ filteredStoryboards.length }}/{{ storyboards.length }}
-        </span>
-      </section>
-
-      <section v-if="filteredStoryboards.length" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        <article v-for="storyboard in filteredStoryboards" :key="storyboard.id" class="rounded-lg overflow-hidden group" style="background-color: var(--bg-card); border: 1px solid var(--border-color);">
-          <button class="block w-full text-left" @click="openStoryboard(storyboard)">
-            <div class="aspect-video bg-black/20 flex items-center justify-center overflow-hidden">
-              <img v-if="storyboard.thumbnail" :src="storyboard.thumbnail" class="w-full h-full object-cover" />
-              <span v-else class="text-xs" style="color: var(--text-tertiary);">暂无图片</span>
-            </div>
-            <div class="p-3">
-              <div class="font-semibold truncate">{{ storyboard.name }}</div>
-              <div class="mt-1 flex justify-between text-xs" style="color: var(--text-tertiary);">
-                <span>{{ storyboard.completedCount }}/{{ storyboard.shotCount }} 张</span>
-                <span>{{ formatDate(storyboard.createdAt) }}</span>
-              </div>
-            </div>
-          </button>
-          <button class="mx-3 mb-3 text-xs text-red-400 hover:text-red-300" @click="deleteStoryboard(storyboard)">删除</button>
-        </article>
-      </section>
-
-      <div v-else class="h-64 rounded-lg flex items-center justify-center text-sm" style="background-color: var(--bg-card); border: 1px dashed var(--border-color); color: var(--text-tertiary);">
-        {{ isLoading ? '加载中...' : storyboards.length ? '未找到匹配分镜头' : '暂无分镜头资产' }}
-      </div>
-    </main>
-
-    <main v-else class="flex-1 overflow-hidden grid grid-cols-1 lg:grid-cols-[1fr_420px]">
-      <section class="overflow-auto p-6">
-        <div class="mb-4">
-          <h3 class="text-lg font-bold">{{ selectedStoryboard.name }}</h3>
-          <p class="text-xs" style="color: var(--text-tertiary);">{{ selectedStoryboard.completedCount }}/{{ selectedStoryboard.shotCount }} 张已完成</p>
-        </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          <button
-            v-for="shot in selectedStoryboard.shots"
-            :key="shot.index"
-            class="aspect-video rounded-lg overflow-hidden border text-left relative"
-            :style="shot.index === currentShotIndex ? 'border-color: var(--accent-color);' : 'border-color: var(--border-color);'"
-            @click="selectShot(shot.index)"
-          >
-            <img v-if="shot.thumbnail" :src="shot.thumbnail" class="w-full h-full object-cover" />
-            <div v-else class="w-full h-full flex items-center justify-center" style="background-color: var(--bg-card); color: var(--text-tertiary);">
-              {{ shot.status === 'failed' ? '生成失败' : '等待生成' }}
-            </div>
-            <div class="absolute left-2 top-2 px-2 py-1 rounded bg-black/70 text-white text-xs font-bold">#{{ shot.index }}</div>
-          </button>
-        </div>
-      </section>
-
-      <aside class="border-l p-5 overflow-auto space-y-5" style="background-color: var(--bg-secondary); border-color: var(--border-color);">
-        <div>
-          <label class="block text-xs font-bold mb-1" style="color: var(--text-tertiary);">当前图片序号</label>
-          <select v-model.number="currentShotIndex" class="w-full rounded-lg px-3 py-2" style="background-color: var(--bg-card); border: 1px solid var(--border-color);" @change="handleShotIndexChange">
-            <option v-for="shot in selectedStoryboard.shots" :key="shot.index" :value="shot.index">第 {{ shot.index }} 张</option>
-          </select>
-        </div>
-
-        <div class="space-y-4">
-          <section v-for="type in (['role', 'costume', 'scene'] as AssetBucket[])" :key="type" class="space-y-2">
-            <div class="flex items-center justify-between">
-              <label class="text-xs font-bold" style="color: var(--text-tertiary);">
-                {{ type === 'role' ? '角色' : type === 'costume' ? '服饰' : '场景' }}
-                <span class="ml-1 font-mono">{{ selectedPathsFor(type).length }}</span>
-              </label>
-              <button class="rounded-md border px-2 py-1 text-xs" style="border-color: var(--border-color);" @click="openAssetPicker(type)">
-                添加
-              </button>
-            </div>
-            <div v-if="selectedAssetsFor(type).length" class="grid grid-cols-2 gap-2">
-              <div v-for="asset in selectedAssetsFor(type)" :key="asset.path" class="rounded-md overflow-hidden border relative group" style="border-color: var(--border-color); background-color: var(--bg-card);">
-                <div class="aspect-[4/3] bg-white/95">
-                  <img v-if="asset.thumbnail" :src="asset.thumbnail" class="w-full h-full object-contain" />
-                </div>
-                <div class="px-1.5 py-1 text-[10px] truncate" :title="asset.name">{{ asset.name }}</div>
-                <button class="absolute right-1 top-1 h-5 w-5 rounded bg-black/70 text-white opacity-0 group-hover:opacity-100" @click="removeSelectedAsset(type, asset.path)">x</button>
-              </div>
-            </div>
-            <div v-else class="rounded-md border border-dashed px-3 py-3 text-xs" style="border-color: var(--border-color); color: var(--text-tertiary);">
-              未选择{{ type === 'role' ? '角色' : type === 'costume' ? '服饰' : '场景' }}
-            </div>
-          </section>
-          <p class="text-[10px]" style="color: var(--text-tertiary);">参考资产总数 {{ selectedTotal }}/{{ MAX_REFERENCE_ASSETS }}</p>
-        </div>
-
-        <div>
-          <label class="block text-xs font-bold mb-1" style="color: var(--text-tertiary);">提示词</label>
-          <textarea v-model="shotPrompt" rows="7" class="w-full rounded-lg px-3 py-2 resize-none" style="background-color: var(--bg-card); border: 1px solid var(--border-color);" placeholder="描述这一张分镜图的镜头、动作、氛围、构图..." />
-        </div>
-
-        <button class="w-full rounded-lg py-3 text-white font-semibold disabled:opacity-60" style="background-color: var(--accent-color);" :disabled="isGenerating" @click="generateCurrentShot">
-          {{ isGenerating ? '生成中...' : `生成第 ${currentShotIndex} 张` }}
-        </button>
-      </aside>
-    </main>
-
-    <Teleport to="body">
-      <div v-if="pickerType" class="fixed inset-0 z-[200] bg-black/80 backdrop-blur-md flex flex-col" @click.self="closeAssetPicker">
-        <div class="h-20 shrink-0 border-b flex items-center justify-between px-8" style="background-color: var(--bg-secondary); border-color: var(--border-color); color: var(--text-primary);">
+  <div class="h-full overflow-hidden bg-[var(--bg-primary)] text-[var(--text-primary)]">
+    <main class="flex h-full flex-col overflow-hidden">
+      <section class="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-6 py-5">
+        <div class="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h3 class="text-lg font-bold">{{ pickerTitle }}</h3>
-            <p class="text-xs" style="color: var(--text-tertiary);">已选 {{ selectedTotal }}/{{ MAX_REFERENCE_ASSETS }} 张，点击图片添加或取消</p>
+            <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-[var(--text-tertiary)]">
+              Storyboard Console
+            </p>
+            <h2 class="mt-2 text-lg font-bold tracking-wider text-[var(--text-secondary)]">
+              制作分镜 STORYBOARD EDITOR
+            </h2>
           </div>
-          <button class="h-10 w-10 rounded-md text-xl" style="background-color: var(--bg-card);" @click="closeAssetPicker">×</button>
-        </div>
-        <div class="flex-1 overflow-auto p-8" style="background-color: var(--bg-primary);">
-          <div v-if="pickerAssets.length" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 xl:grid-cols-7 gap-5">
-            <button
-              v-for="asset in pickerAssets"
-              :key="asset.path"
-              class="aspect-[4/3] rounded-lg overflow-hidden border-2 relative text-left group bg-white/95"
-              :class="isSelected(pickerType, asset.path) ? 'border-blue-500' : 'border-transparent hover:border-blue-500/70'"
-              :disabled="selectedTotal >= MAX_REFERENCE_ASSETS && !isSelected(pickerType, asset.path)"
-              @click="toggleAsset(asset)"
-            >
-              <img :src="asset.thumbnail" class="h-full w-full object-contain" :class="selectedTotal >= MAX_REFERENCE_ASSETS && !isSelected(pickerType, asset.path) ? 'opacity-40' : 'opacity-90 group-hover:opacity-100'" />
-              <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent p-2 pt-8">
-                <p class="truncate text-xs font-bold text-white">{{ asset.name }}</p>
-              </div>
-              <div v-if="isSelected(pickerType, asset.path)" class="absolute right-2 top-2 h-6 w-6 rounded-full bg-blue-500 text-white flex items-center justify-center text-sm">✓</div>
+
+          <div class="flex flex-wrap items-center gap-2">
+            <button class="primary-button" type="button" title="新建分镜">
+              <Plus class="h-4 w-4" />
+              <span>新建</span>
             </button>
           </div>
-          <div v-else class="h-64 flex items-center justify-center text-sm" style="color: var(--text-tertiary);">
-            当前分类暂无可选资产
+        </div>
+      </section>
+
+      <section class="min-h-0 flex-1 overflow-hidden px-6 py-5">
+        <div class="panel-shell h-full overflow-hidden rounded-xl border border-[var(--border-color)]">
+          <div class="panel-topbar">
+            <div>
+              <p class="text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--text-tertiary)]">
+                Shot Table
+              </p>
+            </div>
+            <div class="flex flex-wrap gap-2 text-[10px] text-[var(--text-tertiary)]">
+              <span class="metric-pill">{{ shots.length }} shots</span>
+            </div>
+          </div>
+
+          <div class="h-[calc(100%-72px)] overflow-auto custom-scrollbar">
+            <table class="min-w-[1480px] border-collapse text-left">
+              <colgroup>
+                <col class="w-[78px]" />
+                <col class="w-[94px]" />
+                <col class="w-[218px]" />
+                <col class="w-[320px]" />
+                <col class="w-[170px]" />
+                <col class="w-[170px]" />
+                <col class="w-[170px]" />
+                <col class="w-[112px]" />
+              </colgroup>
+              <thead class="sticky top-0 z-10 bg-[var(--bg-secondary)]">
+                <tr class="border-b border-[var(--border-color)] text-[11px] font-bold tracking-wide text-[var(--text-tertiary)]">
+                  <th class="table-head">排序</th>
+                  <th class="table-head">镜号</th>
+                  <th class="table-head">画面</th>
+                  <th class="table-head">内容</th>
+                  <th class="table-head">景别</th>
+                  <th class="table-head">运动</th>
+                  <th class="table-head">演员</th>
+                  <th class="table-head">操作</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                <tr
+                  v-for="shot in shots"
+                  :key="shot.id"
+                  class="border-b border-[var(--border-color)] last:border-b-0 hover:bg-white/[0.03]"
+                >
+                  <td class="table-cell">
+                    <button class="drag-button" type="button" title="拖动排序">
+                      <GripVertical class="h-4 w-4" />
+                    </button>
+                  </td>
+
+                  <td class="table-cell">
+                    <div class="number-badge">
+                      {{ shot.no }}
+                    </div>
+                  </td>
+
+                  <td class="table-cell">
+                    <button class="image-placeholder" type="button" title="新增画面">
+                      <ImagePlus class="h-6 w-6 text-[var(--text-tertiary)]" />
+                      <span>新增画面</span>
+                    </button>
+                  </td>
+
+                  <td class="table-cell">
+                    <input class="plain-input" type="text" :value="shot.content" aria-label="镜头内容" />
+                  </td>
+
+                  <td class="table-cell">
+                    <div class="select-shell">
+                      <span>{{ shot.lens }}</span>
+                      <ChevronDown class="h-4 w-4 text-[var(--text-tertiary)]" />
+                    </div>
+                  </td>
+
+                  <td class="table-cell">
+                    <div class="select-shell">
+                      <span>{{ shot.move }}</span>
+                      <ChevronDown class="h-4 w-4 text-[var(--text-tertiary)]" />
+                    </div>
+                  </td>
+
+                  <td class="table-cell">
+                    <input class="plain-input strong-input" type="text" :value="shot.actor" aria-label="演员" />
+                  </td>
+
+                  <td class="table-cell">
+                    <div class="flex items-center gap-3 text-[var(--text-secondary)]">
+                      <button class="icon-button" type="button" title="删除">
+                        <Trash2 class="h-4 w-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
-      </div>
-    </Teleport>
+      </section>
+
+      <section class="flex shrink-0 flex-wrap gap-2 px-6 pb-5 text-xs text-[var(--text-tertiary)]">
+        <span class="status-pill">镜头总数 {{ shots.length }}</span>
+      </section>
+    </main>
   </div>
 </template>
+
+<style scoped>
+.toolbar-button {
+  display: inline-flex;
+  height: 2.5rem;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  padding: 0 0.875rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+.toolbar-button:hover {
+  border-color: rgba(96, 165, 250, 0.35);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.primary-button {
+  display: inline-flex;
+  height: 2.5rem;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 0.5rem;
+  background: rgb(37 99 235);
+  padding: 0 1rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #fff;
+  box-shadow: 0 0 20px rgba(37, 99, 235, 0.3);
+  transition: background-color 0.15s ease, transform 0.15s ease;
+}
+
+.primary-button:hover {
+  background: rgb(59 130 246);
+}
+
+.primary-button:active {
+  transform: translateY(1px);
+}
+
+.panel-shell {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0)),
+    var(--bg-primary);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+
+.panel-topbar {
+  display: flex;
+  min-height: 4.5rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.01);
+  padding: 0.875rem 1rem;
+}
+
+.metric-pill {
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+  padding: 0.35rem 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.table-head {
+  height: 2.75rem;
+  padding: 0 0.875rem;
+  white-space: nowrap;
+}
+
+.table-cell {
+  height: 8.125rem;
+  padding: 0.875rem;
+  vertical-align: top;
+}
+
+.drag-button {
+  display: grid;
+  height: 2.5rem;
+  width: 2.5rem;
+  place-items: center;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-tertiary);
+  transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+}
+
+.drag-button:hover {
+  border-color: rgba(96, 165, 250, 0.35);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.number-badge {
+  display: grid;
+  height: 2.5rem;
+  width: 4.375rem;
+  place-items: center;
+  border-radius: 0.625rem;
+  border: 1px solid var(--border-color);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0));
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.image-placeholder {
+  display: grid;
+  aspect-ratio: 16 / 9;
+  width: 11.5rem;
+  place-items: center;
+  gap: 0.45rem;
+  border-radius: 0.5rem;
+  border: 1px dashed rgba(113, 113, 122, 0.9);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.image-placeholder:hover {
+  border-color: rgba(96, 165, 250, 0.45);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.plain-input {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0.5rem 0;
+  font-size: 0.9375rem;
+  color: var(--text-tertiary);
+  outline: none;
+}
+
+.plain-input:focus {
+  color: var(--text-primary);
+}
+
+.strong-input {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.select-shell {
+  display: flex;
+  height: 2.25rem;
+  width: 9rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  padding: 0 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+
+.icon-button {
+  display: inline-grid;
+  height: 1.75rem;
+  width: 1.75rem;
+  place-items: center;
+  border-radius: 0.375rem;
+  color: var(--text-tertiary);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.icon-button:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.status-pill {
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  padding: 0.45rem 0.625rem;
+  font-weight: 600;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 999px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
+}
+</style>

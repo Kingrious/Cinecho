@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "type": "role",
+  "name": "性感美女",
+  "prompt": "大眼睛，长腿",
+  "corePrompt": "大眼睛，长腿",
+  "generationPrompt": "大眼睛，长腿",
+  "fullPrompt": "masterpiece, best quality, ultra-detailed, photorealistic, sharp focus, professional photography, white background character turnaround sheet, horizontal three-view layout in one image: front view, side view, back view, aligned on the same baseline, equal scale, complete head-to-toe body, fully clothed practical costume, neutral standing pose, no cropped limbs, no text labels, an adult woman, 21 years old, young adult, East Asian features, almond-shaped eyes, straight dark hair, fair smooth skin, delicate facial structure, 大眼睛，长腿, neutral studio lighting, clean orthographic reference sheet, 8k resolution, RAW photo",
+  "negativePrompt": "deformed, disfigured, bad anatomy, extra limbs, missing fingers, blurry, low quality, watermark, text, logo, ugly, duplicate, morbid, mutilated, poorly drawn face, out of frame, child, teenager, underage, nude, naked, lingerie, bikini, underwear, cleavage, revealing clothing, erotic, sexual, seductive pose",
+  "gender": "female",
+  "ethnicity": "east_asian",
+  "age": 21,
+  "features": [],
+  "provider": "ark",
+  "model": "doubao-seedream-5-0-260128",
+  "imagePath": "D:\\Cinecho\\roles\\性感美女_2.png",
+  "fileName": "性感美女_2.png",
+  "sourceImageUrl": "https://ark-acg-cn-beijing.tos-cn-beijing.volces.com/doubao-seedream-5-0/02177748671614760d9d1fce08649db5f71e61508d2f87fba213a_0.jpeg?X-Tos-Algorithm=TOS4-HMAC-SHA256&X-Tos-Credential=AKLTYWJkZTExNjA1ZDUyNDc3YzhjNTM5OGIyNjBhNDcyOTQ%2F20260429%2Fcn-beijing%2Ftos%2Frequest&X-Tos-Date=20260429T181901Z&X-Tos-Expires=86400&X-Tos-Signature=6767fff3b13efdcbf608ddbe7a64298baa03b56df5b18525867f491304693dfa&X-Tos-SignedHeaders=host",
+  "generatedAt": 1777486614249,
+  "updatedAt": 1777486614249
+}

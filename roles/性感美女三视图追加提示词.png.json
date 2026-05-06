@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "type": "role",
+  "name": "性感美女三视图追加提示词",
+  "prompt": "拥有灵动大眼睛的年轻女性，纤细修长的长腿，十分苗条纤瘦的身材，柔和人像打光，细腻皮肤纹理，高清写真风格，画面清晰质感高级",
+  "corePrompt": "拥有灵动大眼睛的年轻女性，纤细修长的长腿，十分苗条纤瘦的身材，柔和人像打光，细腻皮肤纹理，高清写真风格，画面清晰质感高级",
+  "generationPrompt": "拥有灵动大眼睛的年轻女性，纤细修长的长腿，十分苗条纤瘦的身材，柔和人像打光，细腻皮肤纹理，高清写真风格，画面清晰质感高级",
+  "fullPrompt": "masterpiece, best quality, ultra-detailed, photorealistic, sharp focus, professional photography, white background character turnaround sheet, horizontal three-view layout in one image: front view, side view, back view, aligned on the same baseline, equal scale, complete head-to-toe body, fully clothed practical costume, neutral standing pose, no cropped limbs, no text labels, an adult woman, 21 years old, young adult, East Asian features, almond-shaped eyes, straight dark hair, fair smooth skin, delicate facial structure, 拥有灵动大眼睛的年轻女性，纤细修长的长腿，十分苗条纤瘦的身材，柔和人像打光，细腻皮肤纹理，高清写真风格，画面清晰质感高级, 胸部丰满, 五官立体, neutral studio lighting, clean orthographic reference sheet, 8k resolution, RAW photo",
+  "negativePrompt": "deformed, disfigured, bad anatomy, extra limbs, missing fingers, blurry, low quality, watermark, text, logo, ugly, duplicate, morbid, mutilated, poorly drawn face, out of frame, child, teenager, underage, nude, naked, lingerie, bikini, underwear, cleavage, revealing clothing, erotic, sexual, seductive pose",
+  "gender": "female",
+  "ethnicity": "east_asian",
+  "age": 21,
+  "features": [
+    "胸部丰满",
+    "五官立体"
+  ],
+  "provider": "ark",
+  "model": "doubao-seedream-5-0-260128",
+  "imagePath": "D:\\Cinecho\\roles\\性感美女三视图追加提示词.png",
+  "fileName": "性感美女三视图追加提示词.png",
+  "sourceImageUrl": "https://ark-acg-cn-beijing.tos-cn-beijing.volces.com/doubao-seedream-5-0/021777486847293e3c0010419774ef230e4bef6206f9366133115_0.jpeg?X-Tos-Algorithm=TOS4-HMAC-SHA256&X-Tos-Credential=AKLTYWJkZTExNjA1ZDUyNDc3YzhjNTM5OGIyNjBhNDcyOTQ%2F20260429%2Fcn-beijing%2Ftos%2Frequest&X-Tos-Date=20260429T182121Z&X-Tos-Expires=86400&X-Tos-Signature=fb391429f49d6b0aa589a70d0c0b03c1d3efd52e6485d7d1d960fa1f158f16c7&X-Tos-SignedHeaders=host",
+  "generatedAt": 1777486754135,
+  "updatedAt": 1777486754135
+}

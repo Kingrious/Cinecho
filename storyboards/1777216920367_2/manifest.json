@@ -1,0 +1,124 @@
+{
+  "id": "1777216920367_2",
+  "name": "2",
+  "path": "D:\\Cinecho\\storyboards\\1777216920367_2",
+  "shotCount": 9,
+  "createdAt": 1777216920368,
+  "modifiedAt": 1777475740801,
+  "shots": [
+    {
+      "index": 1,
+      "status": "ready",
+      "prompt": "这个角色在这个场景穿上了这个钢铁侠的服饰",
+      "roleAssetPaths": [
+        "D:\\Cinecho\\roles\\性感美女.png"
+      ],
+      "costumeAssetPaths": [
+        "D:\\Cinecho\\costumes\\Obsidian Operative_3.png"
+      ],
+      "sceneAssetPaths": [
+        "D:\\Cinecho\\scenes\\雨夜小树林2.png"
+      ],
+      "roleAssetPath": "D:\\Cinecho\\roles\\性感美女.png",
+      "costumeAssetPath": "D:\\Cinecho\\costumes\\Obsidian Operative_3.png",
+      "sceneAssetPath": "D:\\Cinecho\\scenes\\雨夜小树林2.png",
+      "imagePath": "D:\\Cinecho\\storyboards\\1777216920367_2\\shot_01.png",
+      "imageUrl": "file:///D:/Cinecho/storyboards/1777216920367_2/shot_01.png",
+      "thumbnail": "file:///D:/Cinecho/storyboards/1777216920367_2/shot_01.png",
+      "updatedAt": 1777218379840,
+      "sourceImageUrl": "file:///D:/Cinecho/storyboards/1777216920367_2/shot_01.png"
+    },
+    {
+      "index": 2,
+      "status": "ready",
+      "prompt": "这个角色在这个场景穿上了这个服饰，但是我需要人物是背面",
+      "roleAssetPaths": [
+        "D:\\Cinecho\\roles\\性感美女.png"
+      ],
+      "costumeAssetPaths": [
+        "D:\\Cinecho\\costumes\\Obsidian Operative_3.png"
+      ],
+      "sceneAssetPaths": [
+        "D:\\Cinecho\\scenes\\雨夜小树林2.png"
+      ],
+      "roleAssetPath": "D:\\Cinecho\\roles\\性感美女.png",
+      "costumeAssetPath": "D:\\Cinecho\\costumes\\Obsidian Operative_3.png",
+      "sceneAssetPath": "D:\\Cinecho\\scenes\\雨夜小树林2.png",
+      "imagePath": "D:\\Cinecho\\storyboards\\1777216920367_2\\shot_02.png",
+      "imageUrl": "file:///D:/Cinecho/storyboards/1777216920367_2/shot_02.png",
+      "thumbnail": "file:///D:/Cinecho/storyboards/1777216920367_2/shot_02.png",
+      "updatedAt": 1777218479529,
+      "sourceImageUrl": "file:///D:/Cinecho/storyboards/1777216920367_2/shot_02.png"
+    },
+    {
+      "index": 3,
+      "status": "ready",
+      "prompt": "这个角色穿这个衣服在这个场景正对着镜头",
+      "roleAssetPaths": [
+        "D:\\Cinecho\\roles\\性感美女.png"
+      ],
+      "costumeAssetPaths": [
+        "D:\\Cinecho\\costumes\\Obsidian Operative_2.png"
+      ],
+      "sceneAssetPaths": [
+        "D:\\Cinecho\\scenes\\雨夜小树林2.png"
+      ],
+      "sourceImageUrl": "https://ark-acg-cn-beijing.tos-cn-beijing.volces.com/doubao-seedream-5-0/021777475837559336c0ccc8833e375a271994f02c20b09e13707_0.jpeg?X-Tos-Algorithm=TOS4-HMAC-SHA256&X-Tos-Credential=AKLTYWJkZTExNjA1ZDUyNDc3YzhjNTM5OGIyNjBhNDcyOTQ%2F20260429%2Fcn-beijing%2Ftos%2Frequest&X-Tos-Date=20260429T151748Z&X-Tos-Expires=86400&X-Tos-Signature=adadf7fae80ca057481c019e94b12ab17255ba404cf2883d3850b7c5c8c6eb1d&X-Tos-SignedHeaders=host",
+      "roleAssetPath": "D:\\Cinecho\\roles\\性感美女.png",
+      "costumeAssetPath": "D:\\Cinecho\\costumes\\Obsidian Operative_2.png",
+      "sceneAssetPath": "D:\\Cinecho\\scenes\\雨夜小树林2.png",
+      "imagePath": "D:\\Cinecho\\storyboards\\1777216920367_2\\shot_03.png",
+      "imageUrl": "https://ark-acg-cn-beijing.tos-cn-beijing.volces.com/doubao-seedream-5-0/021777475837559336c0ccc8833e375a271994f02c20b09e13707_0.jpeg?X-Tos-Algorithm=TOS4-HMAC-SHA256&X-Tos-Credential=AKLTYWJkZTExNjA1ZDUyNDc3YzhjNTM5OGIyNjBhNDcyOTQ%2F20260429%2Fcn-beijing%2Ftos%2Frequest&X-Tos-Date=20260429T151748Z&X-Tos-Expires=86400&X-Tos-Signature=adadf7fae80ca057481c019e94b12ab17255ba404cf2883d3850b7c5c8c6eb1d&X-Tos-SignedHeaders=host",
+      "thumbnail": "file:///D:/Cinecho/storyboards/1777216920367_2/shot_03.png",
+      "updatedAt": 1777475740801
+    },
+    {
+      "index": 4,
+      "status": "generating",
+      "prompt": "",
+      "roleAssetPaths": [],
+      "costumeAssetPaths": [],
+      "sceneAssetPaths": []
+    },
+    {
+      "index": 5,
+      "status": "generating",
+      "prompt": "",
+      "roleAssetPaths": [],
+      "costumeAssetPaths": [],
+      "sceneAssetPaths": []
+    },
+    {
+      "index": 6,
+      "status": "generating",
+      "prompt": "",
+      "roleAssetPaths": [],
+      "costumeAssetPaths": [],
+      "sceneAssetPaths": []
+    },
+    {
+      "index": 7,
+      "status": "generating",
+      "prompt": "",
+      "roleAssetPaths": [],
+      "costumeAssetPaths": [],
+      "sceneAssetPaths": []
+    },
+    {
+      "index": 8,
+      "status": "generating",
+      "prompt": "",
+      "roleAssetPaths": [],
+      "costumeAssetPaths": [],
+      "sceneAssetPaths": []
+    },
+    {
+      "index": 9,
+      "status": "generating",
+      "prompt": "",
+      "roleAssetPaths": [],
+      "costumeAssetPaths": [],
+      "sceneAssetPaths": []
+    }
+  ]
+}
