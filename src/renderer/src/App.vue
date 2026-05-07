@@ -64,7 +64,7 @@ import { Copy, Minus, Square, X } from 'lucide-vue-next'
 import { storeApi, windowApi } from './api/media'
 import AppDialogHost from './components/AppDialogHost.vue'
 
-const currentTheme = ref('dark')
+const currentTheme = ref('light')
 const isMaximized = ref(false)
 let removeWindowMaximizedListener: (() => void) | undefined
 

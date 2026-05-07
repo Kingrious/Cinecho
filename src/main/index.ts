@@ -36,7 +36,8 @@ const DEFAULT_SETTINGS = {
   defaultTextModel: 'doubao-seed-2-0-lite-260215',
   defaultImageModel: 'doubao-seedream-5-0-260128',
   defaultVideoModel: 'doubao-seedance-1-0-pro-fast-251015',
-  videoMaxParallel: 3
+  videoMaxParallel: 3,
+  theme: 'light'
 }
 
 let runtimeSettings: any = { ...DEFAULT_SETTINGS }
@@ -679,16 +680,16 @@ const VIDEO_GENERATE_MODELS = {
     maxDuration: 10,
     defaultResolution: '1080p',
     supportedDurations: [5, 10],
-    imageMode: 'multi_reference',
-    maxReferenceFrames: 4
+    imageMode: 'first_frame',
+    maxReferenceFrames: 1
   },
   'doubao-seedance-1-5-pro-251215': {
     name: 'Seedance 1.5 Pro',
     maxDuration: 10,
     defaultResolution: '1080p',
     supportedDurations: [5, 10],
-    imageMode: 'multi_reference',
-    maxReferenceFrames: 4
+    imageMode: 'first_last_frame',
+    maxReferenceFrames: 2
   }
 }
 
@@ -1757,8 +1758,8 @@ interface GenerateVideoOptions {
   cameraFixed?: boolean
   watermark?: boolean
   referenceImagePaths?: string[]
+  referenceFrameRoles?: Array<'first_frame' | 'reference_frame' | 'last_frame'>
   cameraMotion?: string
-  actionType?: string
   storyboardId?: string
   storyboardName?: string
   storyboardShotOrder?: number[]
@@ -1785,11 +1786,13 @@ type VideoReferenceFrame = {
   source: 'local_data_url' | 'remote_url'
   localPath?: string
   remoteUrl?: string
+  role?: 'first_frame' | 'reference_frame' | 'last_frame'
 }
 
 type VideoReferenceFrameInput = {
   localPath?: string
   remoteUrl?: string
+  role?: 'first_frame' | 'reference_frame' | 'last_frame'
 }
 
 const resolveStoryboardFrameUrls = async (options: GenerateVideoOptions) => {
@@ -1805,7 +1808,8 @@ const resolveStoryboardFrameUrls = async (options: GenerateVideoOptions) => {
 
 const resolveVideoReferenceFrame = async (
   localPath?: string,
-  remoteUrl?: string
+  remoteUrl?: string,
+  role?: 'first_frame' | 'reference_frame' | 'last_frame'
 ): Promise<VideoReferenceFrame | null> => {
   if (localPath) {
     try {
@@ -1815,7 +1819,8 @@ const resolveVideoReferenceFrame = async (
           url: dataUrl,
           source: 'local_data_url',
           localPath,
-          remoteUrl
+          remoteUrl,
+          role
         }
       }
     } catch (error: any) {
@@ -1828,7 +1833,8 @@ const resolveVideoReferenceFrame = async (
       url: remoteUrl!,
       source: 'remote_url',
       localPath,
-      remoteUrl
+      remoteUrl,
+      role
     }
   }
 
@@ -1838,12 +1844,14 @@ const resolveVideoReferenceFrame = async (
 const pickVideoReferenceFrameInputs = (
   referenceImagePaths: string[],
   referenceFrameUrls: string[],
-  maxReferenceFrames: number
+  maxReferenceFrames: number,
+  referenceFrameRoles: Array<'first_frame' | 'reference_frame' | 'last_frame'> = []
 ): VideoReferenceFrameInput[] => {
   const count = Math.max(referenceImagePaths.length, referenceFrameUrls.length)
   const inputs = Array.from({ length: count }, (_, index) => ({
     localPath: referenceImagePaths[index],
-    remoteUrl: referenceFrameUrls[index]
+    remoteUrl: referenceFrameUrls[index],
+    role: referenceFrameRoles[index]
   })).filter(item => item.localPath || item.remoteUrl)
 
   if (inputs.length <= maxReferenceFrames) return inputs
@@ -1990,9 +1998,9 @@ ipcMain.handle('media:generateVideo', async (_event, options: GenerateVideoOptio
     const referenceImagePaths = options.referenceImagePaths?.filter(Boolean) || []
     const referenceFrameUrls = await resolveStoryboardFrameUrls(options)
     const maxReferenceFrames = Math.max(1, modelConfig.maxReferenceFrames || (modelConfig.imageMode === 'first_last_frame' ? 2 : 1))
-    const referenceFrameInputs = pickVideoReferenceFrameInputs(referenceImagePaths, referenceFrameUrls, maxReferenceFrames)
+    const referenceFrameInputs = pickVideoReferenceFrameInputs(referenceImagePaths, referenceFrameUrls, maxReferenceFrames, options.referenceFrameRoles)
     const referenceFrames = (await Promise.all(
-      referenceFrameInputs.map(input => resolveVideoReferenceFrame(input.localPath, input.remoteUrl))
+      referenceFrameInputs.map(input => resolveVideoReferenceFrame(input.localPath, input.remoteUrl, input.role))
     )).filter((frame): frame is VideoReferenceFrame => Boolean(frame))
     const isImageToVideo = referenceFrames.length > 0
 
@@ -2003,16 +2011,11 @@ ipcMain.handle('media:generateVideo', async (_event, options: GenerateVideoOptio
     const duration = supportedDurations.includes(requestedDuration) ? requestedDuration : supportedDurations[0]
     const resolution = options.resolution || '1080p'
     const cameraFixed = options.cameraFixed !== undefined ? options.cameraFixed : false
-    const watermark = options.watermark !== undefined ? options.watermark : true
+    const watermark = options.watermark !== undefined ? options.watermark : false
 
     // 注入运镖语言（如果用户选择了运镖方式）
     if (options.cameraMotion) {
       fullPrompt = `${fullPrompt}, ${options.cameraMotion}`
-    }
-
-    // 注入角色动作描述
-    if (options.actionType) {
-      fullPrompt = `${fullPrompt}, ${options.actionType}`
     }
 
     if (cameraFixed && !options.cameraMotion) {
@@ -2040,11 +2043,15 @@ ipcMain.handle('media:generateVideo', async (_event, options: GenerateVideoOptio
     // 构建请求内容
     const buildVideoRequestData = (frames: VideoReferenceFrame[]) => {
       const imageItems: VideoContentItem[] = frames.map((frame, index) => {
-        const role = index === 0
+        const fallbackRole = index === 0
           ? 'first_frame'
           : index === frames.length - 1
             ? 'last_frame'
             : 'reference_frame'
+        const explicitRole = frame.role || fallbackRole
+        const role = modelConfig.imageMode === 'first_frame' && index === 0
+          ? 'first_frame'
+          : explicitRole
         return {
           type: 'image_url',
           role,
@@ -2370,6 +2377,11 @@ const extractThumbnail = (filePath: string): Promise<string> => {
       })
   })
 }
+
+ipcMain.handle('media:getVideoThumbnail', async (_event, filePath: string) => {
+  if (!filePath || !isPathInside(filePath, outputDir)) return ''
+  return extractThumbnail(filePath)
+})
 
 const scanStitchVideoData = async (
   targetOutputDir = outputDir,
@@ -2827,6 +2839,10 @@ const startDevBridgeServer = () => {
         case '/media/getThumbnail':
           if (!isBridgeFileAllowed(body.assetPath)) throw new Error('文件不在资产目录内')
           sendBridgeJson(res, 200, bridgeAssetUrl(body.assetPath), origin)
+          return
+        case '/media/getVideoThumbnail':
+          if (!isBridgeFileAllowed(body.assetPath)) throw new Error('文件不在资产目录内')
+          sendBridgeJson(res, 200, await extractThumbnail(body.assetPath), origin)
           return
         case '/media/openAsset':
           if (!isBridgeFileAllowed(body.assetPath)) throw new Error('文件不在资产目录内')

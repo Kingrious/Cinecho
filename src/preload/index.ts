@@ -24,6 +24,7 @@ const api = {
     getAssetStats: (path: string) => ipcRenderer.invoke('media:getAssetStats', path),
     deleteAsset: (assetPath: string) => ipcRenderer.invoke('media:deleteAsset', assetPath),
     getThumbnail: (assetPath: string) => ipcRenderer.invoke('media:getThumbnail', assetPath),
+    getVideoThumbnail: (assetPath: string) => ipcRenderer.invoke('media:getVideoThumbnail', assetPath),
     openAsset: (assetPath: string) => ipcRenderer.invoke('media:openAsset', assetPath),
     revealInExplorer: (assetPath: string) => ipcRenderer.invoke('media:revealInExplorer', assetPath),
     getOutputDirectory: () => ipcRenderer.invoke('media:getOutputDirectory'),

@@ -499,19 +499,19 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <div v-else class="h-[calc(100%-72px)] overflow-auto custom-scrollbar">
-            <table class="min-w-[1880px] border-collapse text-left">
+          <div v-else class="shot-table-scroll h-[calc(100%-72px)] overflow-auto custom-scrollbar">
+            <table class="storyboard-shot-table border-collapse text-left">
               <colgroup>
-                <col class="w-[78px]" />
-                <col class="w-[94px]" />
-                <col class="w-[218px]" />
-                <col class="w-[420px]" />
-                <col class="w-[150px]" />
-                <col class="w-[150px]" />
-                <col class="w-[190px]" />
-                <col class="w-[190px]" />
-                <col class="w-[190px]" />
-                <col class="w-[112px]" />
+                <col class="shot-col-sort" />
+                <col class="shot-col-no" />
+                <col class="shot-col-image" />
+                <col class="shot-col-content" />
+                <col class="shot-col-lens" />
+                <col class="shot-col-move" />
+                <col class="shot-col-asset" />
+                <col class="shot-col-asset" />
+                <col class="shot-col-asset" />
+                <col class="shot-col-action" />
               </colgroup>
               <thead class="sticky top-0 z-10 bg-[var(--bg-secondary)]">
                 <tr class="border-b border-[var(--border-color)] text-[11px] font-bold tracking-wide text-[var(--text-tertiary)]">
@@ -829,22 +829,58 @@ onUnmounted(() => {
   outline: none;
 }
 
+.shot-table-scroll {
+  container-type: inline-size;
+}
+
+.storyboard-shot-table {
+  width: max(100%, 75rem);
+  table-layout: fixed;
+}
+
+.shot-col-sort {
+  width: 4%;
+}
+
+.shot-col-no {
+  width: 5%;
+}
+
+.shot-col-image {
+  width: 12%;
+}
+
+.shot-col-content {
+  width: 25%;
+}
+
+.shot-col-lens,
+.shot-col-move,
+.shot-col-action {
+  width: 8%;
+}
+
+.shot-col-asset {
+  width: 10%;
+}
+
 .table-head {
   height: 2.75rem;
-  padding: 0 0.875rem;
+  padding: 0 clamp(0.5rem, 0.9cqi, 0.875rem);
   white-space: nowrap;
 }
 
 .table-cell {
-  height: 8.125rem;
-  padding: 0.875rem;
+  height: auto;
+  min-height: 8.125rem;
+  padding: clamp(0.5rem, 0.9cqi, 0.875rem);
   vertical-align: top;
 }
 
 .drag-button {
   display: grid;
-  height: 2.5rem;
-  width: 2.5rem;
+  height: clamp(2rem, 3cqi, 2.5rem);
+  width: clamp(2rem, 3cqi, 2.5rem);
   place-items: center;
   border-radius: 0.5rem;
   border: 1px solid var(--border-color);
@@ -862,7 +898,7 @@ onUnmounted(() => {
 .number-badge {
   display: grid;
   height: 2.5rem;
-  width: 4.375rem;
+  width: min(100%, 4.375rem);
   place-items: center;
   border-radius: 0.625rem;
   border: 1px solid var(--border-color);
@@ -873,14 +909,15 @@ onUnmounted(() => {
 }
 
 .image-frame {
-  width: 11.5rem;
+  width: 100%;
+  max-width: 11.5rem;
 }
 
 .image-placeholder,
 .image-button {
   display: grid;
   aspect-ratio: 16 / 9;
-  width: 11.5rem;
+  width: 100%;
   place-items: center;
   gap: 0.45rem;
   overflow: hidden;
@@ -984,7 +1021,8 @@ onUnmounted(() => {
   position: relative;
   display: flex;
   height: 2.25rem;
-  width: 9rem;
+  width: 100%;
+  min-width: 0;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
@@ -1020,12 +1058,12 @@ onUnmounted(() => {
 }
 
 .asset-select-shell {
-  width: 10.5rem;
+  width: 100%;
 }
 
 .asset-hint {
   margin-top: 0.45rem;
-  max-width: 10.5rem;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

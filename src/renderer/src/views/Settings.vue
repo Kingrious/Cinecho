@@ -27,7 +27,7 @@ const dialog = useDialog()
 const isLoading = ref(true)
 const isSaving = ref(false)
 const hasChanges = ref(false)
-const currentTheme = ref('dark')
+const currentTheme = ref('light')
 
 const selectedKeyProvider = ref<ProviderId>('ark')
 const apiKeys = ref<Record<string, string>>({})
@@ -89,7 +89,7 @@ const loadSettings = async () => {
     defaultImageModel.value = settings.defaultImageModel || 'doubao-seedream-5-0-260128'
     defaultVideoModel.value = settings.defaultVideoModel || 'doubao-seedance-1-0-pro-fast-251015'
     videoMaxParallel.value = normalizeVideoMaxParallel(settings.videoMaxParallel ?? 3)
-    currentTheme.value = settings.theme || 'dark'
+    currentTheme.value = settings.theme || 'light'
     ensureModelForProvider()
     hasChanges.value = false
   } finally {
