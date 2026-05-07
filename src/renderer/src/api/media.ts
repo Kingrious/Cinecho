@@ -9,6 +9,7 @@ import type {
   StitchExportOptions,
   StitchExportResult,
   StoryboardAsset,
+  UpdateStoryboardOptions,
   VideoAsset,
   VideoMeta
 } from '../types/media'
@@ -69,6 +70,7 @@ export interface ElectronAPI {
     scan: () => Promise<StoryboardAsset[]>
     create: (options: CreateStoryboardOptions) => Promise<StoryboardAsset>
     get: (storyboardId: string) => Promise<StoryboardAsset | null>
+    update: (options: UpdateStoryboardOptions) => Promise<StoryboardAsset>
     generateShot: (options: GenerateStoryboardShotOptions) => Promise<StoryboardAsset>
     delete: (storyboardId: string) => Promise<boolean>
   }
@@ -164,6 +166,7 @@ const bridgeApi: ElectronAPI = {
     scan: () => bridgeRequest<StoryboardAsset[]>('/storyboard/scan'),
     create: (options) => bridgeRequest<StoryboardAsset>('/storyboard/create', options),
     get: (storyboardId) => bridgeRequest<StoryboardAsset | null>('/storyboard/get', { storyboardId }),
+    update: (options) => bridgeRequest<StoryboardAsset>('/storyboard/update', options),
     generateShot: (options) => bridgeRequest<StoryboardAsset>('/storyboard/generateShot', options),
     delete: (storyboardId) => bridgeRequest<boolean>('/storyboard/delete', { storyboardId })
   },
@@ -255,6 +258,7 @@ export const storyboardApi = {
   scan: (): Promise<StoryboardAsset[]> => getApi().storyboard.scan(),
   create: (options: CreateStoryboardOptions): Promise<StoryboardAsset> => getApi().storyboard.create(options),
   get: (storyboardId: string): Promise<StoryboardAsset | null> => getApi().storyboard.get(storyboardId),
+  update: (options: UpdateStoryboardOptions): Promise<StoryboardAsset> => getApi().storyboard.update(options),
   generateShot: (options: GenerateStoryboardShotOptions): Promise<StoryboardAsset> => getApi().storyboard.generateShot(options),
   delete: (storyboardId: string): Promise<boolean> => getApi().storyboard.delete(storyboardId)
 }

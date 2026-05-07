@@ -35,7 +35,8 @@ const DEFAULT_SETTINGS = {
   defaultVideoProvider: 'ark',
   defaultTextModel: 'doubao-seed-2-0-lite-260215',
   defaultImageModel: 'doubao-seedream-5-0-260128',
-  defaultVideoModel: 'doubao-seedance-1-0-pro-fast-251015'
+  defaultVideoModel: 'doubao-seedance-1-0-pro-fast-251015',
+  videoMaxParallel: 3
 }
 
 let runtimeSettings: any = { ...DEFAULT_SETTINGS }
@@ -616,11 +617,16 @@ let userApiKey = '' // 用户配置的 API Key
 const normalizeSettings = (settings: any = {}) => {
   const apiKeys = { ...(settings.apiKeys || {}) }
   if (settings.apiKey && !apiKeys.ark) apiKeys.ark = settings.apiKey
+  const parsedVideoMaxParallel = Number(settings.videoMaxParallel ?? DEFAULT_SETTINGS.videoMaxParallel)
+  const videoMaxParallel = Number.isFinite(parsedVideoMaxParallel)
+    ? Math.min(10, Math.max(1, Math.round(parsedVideoMaxParallel)))
+    : DEFAULT_SETTINGS.videoMaxParallel
   return {
     ...DEFAULT_SETTINGS,
     ...settings,
     apiKeys,
-    outputDir: settings.outputDir || outputDir
+    outputDir: settings.outputDir || outputDir,
+    videoMaxParallel
   }
 }
 
@@ -1261,6 +1267,10 @@ interface StoryboardShot {
   index: number
   status: 'ready' | 'generating' | 'failed'
   prompt: string
+  content?: string
+  lens?: string
+  move?: string
+  actor?: string
   imagePath?: string
   imageUrl?: string
   sourceImageUrl?: string
@@ -1303,8 +1313,15 @@ const normalizeStoryboardShot = (shot: StoryboardShot): StoryboardShot => {
   const roleAssetPaths = normalizePathList(shot.roleAssetPaths, shot.roleAssetPath)
   const costumeAssetPaths = normalizePathList(shot.costumeAssetPaths, shot.costumeAssetPath)
   const sceneAssetPaths = normalizePathList(shot.sceneAssetPaths, shot.sceneAssetPath)
+  const content = shot.content ?? shot.prompt ?? ''
   return {
     ...shot,
+    status: shot.status || 'ready',
+    prompt: shot.prompt ?? content,
+    content,
+    lens: shot.lens || '中景',
+    move: shot.move || '固定',
+    actor: shot.actor || '',
     roleAssetPaths,
     costumeAssetPaths,
     sceneAssetPaths,
@@ -1359,13 +1376,25 @@ const writeStoryboardManifest = async (manifest: StoryboardManifest) => {
   await writeFile(getStoryboardManifestPath(manifest.path), JSON.stringify(manifest, null, 2), 'utf-8')
 }
 
+const sanitizeStoryboardShots = (shots: StoryboardShot[] = []) => {
+  return shots.map((shot, index) => normalizeStoryboardShot({
+    ...shot,
+    index: index + 1,
+    status: shot.status === 'generating' ? 'generating' : shot.status === 'failed' ? 'failed' : 'ready',
+    prompt: shot.prompt ?? shot.content ?? ''
+  }))
+}
+
 const getStoryboardById = async (storyboardId: string): Promise<StoryboardManifest | null> => {
   const dir = join(getStoryboardsDir(), sanitizeFileName(storyboardId, storyboardId))
   return readStoryboardManifest(dir)
 }
 
-const buildStoryboardPrompt = (prompt: string): string => {
-  return `${QUALITY_PREFIX}, cinematic storyboard frame, 16:9 composition, coherent character costume and scene continuity from reference images, production storyboard still, no text labels, no watermark, ${prompt}`
+const buildStoryboardPrompt = (prompt: string, hasReferenceImages = false): string => {
+  const referenceInstruction = hasReferenceImages
+    ? ', coherent character costume and scene continuity from reference images'
+    : ''
+  return `${QUALITY_PREFIX}, cinematic storyboard frame, 16:9 composition${referenceInstruction}, production storyboard still, no text labels, no watermark, ${prompt}`
 }
 
 const referenceImageCache = new Map<string, string>()
@@ -1503,7 +1532,15 @@ ipcMain.handle('storyboard:create', async (_event, options: { name: string; shot
     shotCount,
     createdAt: now,
     modifiedAt: now,
-    shots: Array.from({ length: shotCount }, (_, i) => ({ index: i + 1, status: 'generating', prompt: '' }))
+    shots: Array.from({ length: shotCount }, (_, i) => ({
+      index: i + 1,
+      status: 'ready',
+      prompt: '',
+      content: '',
+      lens: '中景',
+      move: '固定',
+      actor: ''
+    }))
   }
   await writeStoryboardManifest(manifest)
   return storyboardToAsset(manifest)
@@ -1512,6 +1549,16 @@ ipcMain.handle('storyboard:create', async (_event, options: { name: string; shot
 ipcMain.handle('storyboard:get', async (_event, storyboardId: string) => {
   const manifest = await getStoryboardById(storyboardId)
   return manifest ? storyboardToAsset(manifest) : null
+})
+
+ipcMain.handle('storyboard:update', async (_event, options: { storyboardId: string; name?: string; shots: StoryboardShot[] }) => {
+  const manifest = await getStoryboardById(options.storyboardId)
+  if (!manifest) throw new Error('Storyboard not found')
+  manifest.name = options.name?.trim() || manifest.name
+  manifest.shots = sanitizeStoryboardShots(options.shots)
+  manifest.shotCount = manifest.shots.length
+  await writeStoryboardManifest(manifest)
+  return storyboardToAsset(manifest)
 })
 
 ipcMain.handle('storyboard:generateShot', async (_event, options: {
@@ -1534,6 +1581,7 @@ ipcMain.handle('storyboard:generateShot', async (_event, options: {
 
   shot.status = 'generating'
   shot.prompt = options.prompt
+  shot.content = shot.content || options.prompt
   shot.roleAssetPaths = normalizePathList(options.roleAssetPaths, options.roleAssetPath)
   shot.costumeAssetPaths = normalizePathList(options.costumeAssetPaths, options.costumeAssetPath)
   shot.sceneAssetPaths = normalizePathList(options.sceneAssetPaths, options.sceneAssetPath)
@@ -1549,10 +1597,7 @@ ipcMain.handle('storyboard:generateShot', async (_event, options: {
     ...(shot.costumeAssetPaths || []),
     ...(shot.sceneAssetPaths || [])
   ]
-  const refPrompt = refs.length > 0
-    ? `Selected existing assets: ${refs.map(ref => basename(ref, extname(ref))).join(', ')}. Use them for identity, outfit, and environment continuity. `
-    : ''
-  const result = await generateArkImageToFile(buildStoryboardPrompt(`${refPrompt}${options.prompt}`), localFilePath, fileName, NEGATIVE_PROMPT_SCENE, refs)
+  const result = await generateArkImageToFile(buildStoryboardPrompt(options.prompt, refs.length > 0), localFilePath, fileName, NEGATIVE_PROMPT_SCENE, refs)
 
   if (result.success && result.filePath) {
     shot.status = 'ready'
@@ -1606,7 +1651,15 @@ const createStoryboardData = async (
     shotCount,
     createdAt: now,
     modifiedAt: now,
-    shots: Array.from({ length: shotCount }, (_, i) => ({ index: i + 1, status: 'generating', prompt: '' }))
+    shots: Array.from({ length: shotCount }, (_, i) => ({
+      index: i + 1,
+      status: 'ready',
+      prompt: '',
+      content: '',
+      lens: '中景',
+      move: '固定',
+      actor: ''
+    }))
   }
   await writeStoryboardManifest(manifest)
   return storyboardToAsset(manifest, assetUrlFor)
@@ -1618,6 +1671,19 @@ const getStoryboardAssetData = async (
 ) => {
   const manifest = await getStoryboardById(storyboardId)
   return manifest ? storyboardToAsset(manifest, assetUrlFor) : null
+}
+
+const updateStoryboardData = async (
+  options: { storyboardId: string; name?: string; shots: StoryboardShot[] },
+  assetUrlFor: (filePath: string) => string = fileAssetUrl
+) => {
+  const manifest = await getStoryboardById(options.storyboardId)
+  if (!manifest) throw new Error('Storyboard not found')
+  manifest.name = options.name?.trim() || manifest.name
+  manifest.shots = sanitizeStoryboardShots(options.shots)
+  manifest.shotCount = manifest.shots.length
+  await writeStoryboardManifest(manifest)
+  return storyboardToAsset(manifest, assetUrlFor)
 }
 
 const generateStoryboardShotData = async (options: {
@@ -1640,6 +1706,7 @@ const generateStoryboardShotData = async (options: {
 
   shot.status = 'generating'
   shot.prompt = options.prompt
+  shot.content = shot.content || options.prompt
   shot.roleAssetPaths = normalizePathList(options.roleAssetPaths, options.roleAssetPath)
   shot.costumeAssetPaths = normalizePathList(options.costumeAssetPaths, options.costumeAssetPath)
   shot.sceneAssetPaths = normalizePathList(options.sceneAssetPaths, options.sceneAssetPath)
@@ -1655,10 +1722,7 @@ const generateStoryboardShotData = async (options: {
     ...(shot.costumeAssetPaths || []),
     ...(shot.sceneAssetPaths || [])
   ]
-  const refPrompt = refs.length > 0
-    ? `Selected existing assets: ${refs.map(ref => basename(ref, extname(ref))).join(', ')}. Use them for identity, outfit, and environment continuity. `
-    : ''
-  const result = await generateArkImageToFile(buildStoryboardPrompt(`${refPrompt}${options.prompt}`), localFilePath, fileName, NEGATIVE_PROMPT_SCENE, refs)
+  const result = await generateArkImageToFile(buildStoryboardPrompt(options.prompt, refs.length > 0), localFilePath, fileName, NEGATIVE_PROMPT_SCENE, refs)
 
   if (result.success && result.filePath) {
     shot.status = 'ready'
@@ -1852,6 +1916,34 @@ ipcMain.handle('media:scanVideos', async (_event, dirPath?: string) => {
   return scanGeneratedVideoAssets(dirPath || outputDir)
 })
 
+let activeVideoGenerationCount = 0
+const pendingVideoGenerationResolvers: Array<() => void> = []
+
+const getVideoMaxParallel = () => {
+  const value = Number(runtimeSettings.videoMaxParallel ?? DEFAULT_SETTINGS.videoMaxParallel)
+  return Number.isFinite(value) ? Math.min(10, Math.max(1, Math.round(value))) : DEFAULT_SETTINGS.videoMaxParallel
+}
+
+const acquireVideoGenerationSlot = async () => {
+  await new Promise<void>((resolve) => {
+    const tryAcquire = () => {
+      if (activeVideoGenerationCount < getVideoMaxParallel()) {
+        activeVideoGenerationCount += 1
+        resolve()
+        return
+      }
+      pendingVideoGenerationResolvers.push(tryAcquire)
+    }
+    tryAcquire()
+  })
+
+  return () => {
+    activeVideoGenerationCount = Math.max(0, activeVideoGenerationCount - 1)
+    const next = pendingVideoGenerationResolvers.shift()
+    if (next) queueMicrotask(next)
+  }
+}
+
 // 视频生成处理器
 ipcMain.handle('media:generateVideo', async (_event, options: GenerateVideoOptions): Promise<GenerateVideoResult> => {
   const provider = options.provider || runtimeSettings.defaultVideoProvider || 'ark'
@@ -1882,6 +1974,9 @@ ipcMain.handle('media:generateVideo', async (_event, options: GenerateVideoOptio
   console.log('[VideoGen] 模型:', options.model)
   console.log('[VideoGen] 视频名称:', options.videoName || '(未设置，使用默认)')
   console.log('[VideoGen] 提示词:', options.prompt?.substring(0, 100) + '...')
+
+  const releaseVideoGenerationSlot = await acquireVideoGenerationSlot()
+  console.log('[VideoGen] 并行槽位:', `${activeVideoGenerationCount}/${getVideoMaxParallel()}`)
 
   try {
     // 确保输出目录存在
@@ -2196,6 +2291,8 @@ ipcMain.handle('media:generateVideo', async (_event, options: GenerateVideoOptio
       success: false,
       error: error?.message || (typeof error === 'string' ? error : '视频生成失败')
     }
+  } finally {
+    releaseVideoGenerationSlot()
   }
 })
 
@@ -2769,6 +2866,9 @@ const startDevBridgeServer = () => {
           return
         case '/storyboard/get':
           sendBridgeJson(res, 200, await getStoryboardAssetData(body.storyboardId, bridgeAssetUrl), origin)
+          return
+        case '/storyboard/update':
+          sendBridgeJson(res, 200, await updateStoryboardData(body, bridgeAssetUrl), origin)
           return
         case '/storyboard/generateShot':
           sendBridgeJson(res, 200, await generateStoryboardShotData(body, bridgeAssetUrl), origin)

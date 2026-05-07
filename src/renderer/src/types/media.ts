@@ -137,6 +137,10 @@ export interface StoryboardShot {
   index: number
   status: AssetStatus
   prompt: string
+  content?: string
+  lens?: string
+  move?: string
+  actor?: string
   imagePath?: string
   imageUrl?: string
   sourceImageUrl?: string
@@ -178,6 +182,12 @@ export interface GenerateStoryboardShotOptions {
   roleAssetPaths?: string[]
   costumeAssetPaths?: string[]
   sceneAssetPaths?: string[]
+}
+
+export interface UpdateStoryboardOptions {
+  storyboardId: string
+  name?: string
+  shots: StoryboardShot[]
 }
 
 export interface StitchClip {

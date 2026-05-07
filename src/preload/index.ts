@@ -38,6 +38,7 @@ const api = {
     scan: () => ipcRenderer.invoke('storyboard:scan'),
     create: (options: any) => ipcRenderer.invoke('storyboard:create', options),
     get: (storyboardId: string) => ipcRenderer.invoke('storyboard:get', storyboardId),
+    update: (options: any) => ipcRenderer.invoke('storyboard:update', options),
     generateShot: (options: any) => ipcRenderer.invoke('storyboard:generateShot', options),
     delete: (storyboardId: string) => ipcRenderer.invoke('storyboard:delete', storyboardId)
   },

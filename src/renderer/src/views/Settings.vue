@@ -41,6 +41,7 @@ const defaultVideoProvider = ref<ProviderId>('ark')
 const defaultTextModel = ref('doubao-seed-2-0-lite-260215')
 const defaultImageModel = ref('doubao-seedream-5-0-260128')
 const defaultVideoModel = ref('doubao-seedance-1-0-pro-fast-251015')
+const videoMaxParallel = ref(3)
 
 const selectedProvider = computed(() => PROVIDERS.find(provider => provider.id === selectedKeyProvider.value) || PROVIDERS[0])
 const textProviders = computed(() => PROVIDERS.filter(provider => provider.text))
@@ -67,6 +68,12 @@ const ensureModelForProvider = () => {
   if (!videoModels.value.includes(defaultVideoModel.value)) defaultVideoModel.value = videoModels.value[0] || ''
 }
 
+const normalizeVideoMaxParallel = (value: unknown) => {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return 3
+  return Math.min(10, Math.max(1, Math.round(parsed)))
+}
+
 const loadSettings = async () => {
   isLoading.value = true
   try {
@@ -81,6 +88,7 @@ const loadSettings = async () => {
     defaultTextModel.value = settings.defaultTextModel || 'doubao-seed-2-0-lite-260215'
     defaultImageModel.value = settings.defaultImageModel || 'doubao-seedream-5-0-260128'
     defaultVideoModel.value = settings.defaultVideoModel || 'doubao-seedance-1-0-pro-fast-251015'
+    videoMaxParallel.value = normalizeVideoMaxParallel(settings.videoMaxParallel ?? 3)
     currentTheme.value = settings.theme || 'dark'
     ensureModelForProvider()
     hasChanges.value = false
@@ -115,6 +123,12 @@ const handleProviderChange = () => {
   void handleSave(false)
 }
 
+const handleVideoMaxParallelInput = (value: string) => {
+  videoMaxParallel.value = normalizeVideoMaxParallel(value)
+  hasChanges.value = true
+  void handleSave(false)
+}
+
 const handlePasteApiKey = async () => {
   const text = await navigator.clipboard.readText()
   if (text) activeApiKey.value = text.trim()
@@ -140,18 +154,25 @@ const handleSave = async (showAlert = true) => {
   isSaving.value = true
   try {
     ensureModelForProvider()
-    await storeApi.updateSetting({
+    const plainApiKeys = Object.fromEntries(
+      Object.entries(apiKeys.value).map(([provider, apiKey]) => [provider, apiKey || ''])
+    )
+
+    const settingsPayload = {
       outputDir: outputDir.value,
       theme: currentTheme.value,
-      apiKeys: apiKeys.value,
-      apiKey: apiKeys.value.ark || '',
+      apiKeys: plainApiKeys,
+      apiKey: plainApiKeys.ark || '',
       defaultTextProvider: defaultTextProvider.value,
       defaultImageProvider: defaultImageProvider.value,
       defaultVideoProvider: defaultVideoProvider.value,
       defaultTextModel: defaultTextModel.value,
       defaultImageModel: defaultImageModel.value,
-      defaultVideoModel: defaultVideoModel.value
-    })
+      defaultVideoModel: defaultVideoModel.value,
+      videoMaxParallel: normalizeVideoMaxParallel(videoMaxParallel.value)
+    }
+
+    await storeApi.updateSetting(settingsPayload)
     hasChanges.value = false
   } catch (error) {
     console.error('Failed to save settings:', error)
@@ -235,6 +256,19 @@ onMounted(loadSettings)
             <select v-model="defaultVideoModel" class="w-full rounded-lg px-3 py-2" style="background-color: var(--bg-secondary); border: 1px solid var(--border-color);" @change="handleSave(false)">
               <option v-for="model in videoModels" :key="model" :value="model">{{ model }}</option>
             </select>
+            <div class="space-y-1">
+              <label class="text-xs font-bold" style="color: var(--text-tertiary);">最高并行数</label>
+              <input
+                :value="videoMaxParallel"
+                type="number"
+                min="1"
+                max="10"
+                step="1"
+                class="w-full rounded-lg px-3 py-2"
+                style="background-color: var(--bg-secondary); border: 1px solid var(--border-color);"
+                @input="event => handleVideoMaxParallelInput((event.target as HTMLInputElement).value)"
+              />
+            </div>
           </div>
         </div>
       </section>
