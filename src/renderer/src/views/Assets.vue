@@ -5,6 +5,11 @@ import { useDialog } from '../composables/useDialog'
 import type { MediaAsset, AssetType } from '../types/media'
 
 const dialog = useDialog()
+const ASSET_LIBRARY_CHANGED_EVENT = 'cinecho:asset-library-changed'
+
+const notifyAssetLibraryChanged = () => {
+  window.dispatchEvent(new CustomEvent(ASSET_LIBRARY_CHANGED_EVENT))
+}
 
 // 鈺愨晲鈺愨晲鈺?State 鈺愨晲鈺愨晲鈺?
 const assets = ref<MediaAsset[]>([])
@@ -190,6 +195,7 @@ const handleSelectDirectory = async () => {
     outputDir.value = dir
     await mediaApi.setOutputDirectory(dir)
     await loadAssets()
+    notifyAssetLibraryChanged()
   }
 }
 
@@ -252,6 +258,7 @@ const handleDeleteAsset = async (asset: MediaAsset) => {
           selectedAsset.value = null
           editingAsset.value = null
         }
+        notifyAssetLibraryChanged()
       } else {
         await dialog.error(`删除失败：无法删除文件 "${asset.name}"。\n\n请检查文件是否存在或是否有权限删除。`)
       }
@@ -569,6 +576,7 @@ const handleStartGeneration = async () => {
         handleAssetClick(newAsset)
       }
       console.log('[Assets] 鍥惧儚鐢熸垚鎴愬姛, 宸叉坊鍔犲埌鍒楄〃')
+      notifyAssetLibraryChanged()
     } else {
       console.error('[Assets] 鍥惧儚鐢熸垚澶辫触:', result.error)
       await dialog.error(`生成失败：${formatGenerationError(result.error)}`)

@@ -9,6 +9,7 @@ import type {
   StitchExportOptions,
   StitchExportResult,
   StoryboardAsset,
+  UpdateStoryboardOptions,
   VideoAsset,
   VideoMeta
 } from '../types/media'
@@ -54,6 +55,7 @@ export interface ElectronAPI {
     getAssetStats: (path?: string) => Promise<AssetStats>
     deleteAsset: (assetPath: string) => Promise<boolean>
     getThumbnail: (assetPath: string) => Promise<string>
+    getVideoThumbnail: (assetPath: string) => Promise<string>
     openAsset: (assetPath: string) => Promise<void>
     revealInExplorer: (assetPath: string) => Promise<void>
     getOutputDirectory: () => Promise<string>
@@ -69,6 +71,7 @@ export interface ElectronAPI {
     scan: () => Promise<StoryboardAsset[]>
     create: (options: CreateStoryboardOptions) => Promise<StoryboardAsset>
     get: (storyboardId: string) => Promise<StoryboardAsset | null>
+    update: (options: UpdateStoryboardOptions) => Promise<StoryboardAsset>
     generateShot: (options: GenerateStoryboardShotOptions) => Promise<StoryboardAsset>
     delete: (storyboardId: string) => Promise<boolean>
   }
@@ -80,6 +83,14 @@ export interface ElectronAPI {
   system: {
     openDirectory: (dirPath: string) => Promise<void>
   }
+  windowControls: {
+    minimize: () => Promise<void>
+    maximize: () => Promise<boolean>
+    unmaximize: () => Promise<boolean>
+    toggleMaximize: () => Promise<boolean>
+    isMaximized: () => Promise<boolean>
+    close: () => Promise<void>
+  }
   stitch: {
     scanVideos: (outputDir?: string) => Promise<VideoMeta[]>
     importVideos: () => Promise<VideoMeta[] | null>
@@ -88,6 +99,7 @@ export interface ElectronAPI {
     revealExport: (filePath: string) => Promise<void>
   }
   onStitchProgress: (callback: (data: { percent: number; currentTime: number }) => void) => () => void
+  onWindowMaximizedChange: (callback: (isMaximized: boolean) => void) => () => void
 }
 
 declare global {
@@ -140,6 +152,7 @@ const bridgeApi: ElectronAPI = {
     getAssetStats: (path) => bridgeRequest<AssetStats>('/media/getAssetStats', { path }),
     deleteAsset: (assetPath) => bridgeRequest<boolean>('/media/deleteAsset', { assetPath }),
     getThumbnail: (assetPath) => bridgeRequest<string>('/media/getThumbnail', { assetPath }),
+    getVideoThumbnail: (assetPath) => bridgeRequest<string>('/media/getVideoThumbnail', { assetPath }),
     openAsset: (assetPath) => bridgeRequest<void>('/media/openAsset', { assetPath }),
     revealInExplorer: (assetPath) => bridgeRequest<void>('/media/revealInExplorer', { assetPath }),
     getOutputDirectory: () => bridgeRequest<string>('/media/getOutputDirectory'),
@@ -155,6 +168,7 @@ const bridgeApi: ElectronAPI = {
     scan: () => bridgeRequest<StoryboardAsset[]>('/storyboard/scan'),
     create: (options) => bridgeRequest<StoryboardAsset>('/storyboard/create', options),
     get: (storyboardId) => bridgeRequest<StoryboardAsset | null>('/storyboard/get', { storyboardId }),
+    update: (options) => bridgeRequest<StoryboardAsset>('/storyboard/update', options),
     generateShot: (options) => bridgeRequest<StoryboardAsset>('/storyboard/generateShot', options),
     delete: (storyboardId) => bridgeRequest<boolean>('/storyboard/delete', { storyboardId })
   },
@@ -166,6 +180,14 @@ const bridgeApi: ElectronAPI = {
   system: {
     openDirectory: (dirPath) => bridgeRequest<void>('/system/openDirectory', { dirPath })
   },
+  windowControls: {
+    minimize: () => unsupported<void>('窗口最小化'),
+    maximize: () => unsupported<boolean>('窗口最大化'),
+    unmaximize: () => unsupported<boolean>('窗口还原'),
+    toggleMaximize: () => unsupported<boolean>('窗口最大化切换'),
+    isMaximized: () => Promise.resolve(false),
+    close: () => unsupported<void>('关闭窗口')
+  },
   stitch: {
     scanVideos: (outputDir) => bridgeRequest<VideoMeta[]>('/stitch/scanVideos', { outputDir }),
     importVideos: () => unsupported<VideoMeta[] | null>('导入本地视频'),
@@ -173,7 +195,8 @@ const bridgeApi: ElectronAPI = {
     exportVideo: (options) => bridgeRequest<StitchExportResult>('/stitch/exportVideo', options),
     revealExport: (filePath) => bridgeRequest<void>('/stitch/revealExport', { filePath })
   },
-  onStitchProgress: () => () => {}
+  onStitchProgress: () => () => {},
+  onWindowMaximizedChange: () => () => {}
 }
 
 export function getApi(): ElectronAPI {
@@ -195,6 +218,7 @@ export const mediaApi = {
   getAssetStats: (path?: string): Promise<AssetStats> => getApi().media.getAssetStats(path),
   deleteAsset: (assetPath: string): Promise<boolean> => getApi().media.deleteAsset(assetPath),
   getThumbnail: (assetPath: string): Promise<string> => getApi().media.getThumbnail(assetPath),
+  getVideoThumbnail: (assetPath: string): Promise<string> => getApi().media.getVideoThumbnail(assetPath),
   openAsset: (assetPath: string): Promise<void> => getApi().media.openAsset(assetPath),
   revealInExplorer: (assetPath: string): Promise<void> => getApi().media.revealInExplorer(assetPath),
   getOutputDirectory: (): Promise<string> => getApi().media.getOutputDirectory(),
@@ -223,10 +247,21 @@ export const systemApi = {
   openDirectory: (dirPath: string): Promise<void> => getApi().system.openDirectory(dirPath)
 }
 
+export const windowApi = {
+  minimize: (): Promise<void> => getApi().windowControls.minimize(),
+  maximize: (): Promise<boolean> => getApi().windowControls.maximize(),
+  unmaximize: (): Promise<boolean> => getApi().windowControls.unmaximize(),
+  toggleMaximize: (): Promise<boolean> => getApi().windowControls.toggleMaximize(),
+  isMaximized: (): Promise<boolean> => getApi().windowControls.isMaximized(),
+  close: (): Promise<void> => getApi().windowControls.close(),
+  onMaximizedChange: (callback: (isMaximized: boolean) => void) => getApi().onWindowMaximizedChange(callback)
+}
+
 export const storyboardApi = {
   scan: (): Promise<StoryboardAsset[]> => getApi().storyboard.scan(),
   create: (options: CreateStoryboardOptions): Promise<StoryboardAsset> => getApi().storyboard.create(options),
   get: (storyboardId: string): Promise<StoryboardAsset | null> => getApi().storyboard.get(storyboardId),
+  update: (options: UpdateStoryboardOptions): Promise<StoryboardAsset> => getApi().storyboard.update(options),
   generateShot: (options: GenerateStoryboardShotOptions): Promise<StoryboardAsset> => getApi().storyboard.generateShot(options),
   delete: (storyboardId: string): Promise<boolean> => getApi().storyboard.delete(storyboardId)
 }

@@ -24,6 +24,7 @@ const api = {
     getAssetStats: (path: string) => ipcRenderer.invoke('media:getAssetStats', path),
     deleteAsset: (assetPath: string) => ipcRenderer.invoke('media:deleteAsset', assetPath),
     getThumbnail: (assetPath: string) => ipcRenderer.invoke('media:getThumbnail', assetPath),
+    getVideoThumbnail: (assetPath: string) => ipcRenderer.invoke('media:getVideoThumbnail', assetPath),
     openAsset: (assetPath: string) => ipcRenderer.invoke('media:openAsset', assetPath),
     revealInExplorer: (assetPath: string) => ipcRenderer.invoke('media:revealInExplorer', assetPath),
     getOutputDirectory: () => ipcRenderer.invoke('media:getOutputDirectory'),
@@ -38,6 +39,7 @@ const api = {
     scan: () => ipcRenderer.invoke('storyboard:scan'),
     create: (options: any) => ipcRenderer.invoke('storyboard:create', options),
     get: (storyboardId: string) => ipcRenderer.invoke('storyboard:get', storyboardId),
+    update: (options: any) => ipcRenderer.invoke('storyboard:update', options),
     generateShot: (options: any) => ipcRenderer.invoke('storyboard:generateShot', options),
     delete: (storyboardId: string) => ipcRenderer.invoke('storyboard:delete', storyboardId)
   },
@@ -45,6 +47,15 @@ const api = {
   // 系统相关
   system: {
     openDirectory: (dirPath: string) => ipcRenderer.invoke('system:openDirectory', dirPath)
+  },
+  
+  windowControls: {
+    minimize: () => ipcRenderer.invoke('window:minimize'),
+    maximize: () => ipcRenderer.invoke('window:maximize'),
+    unmaximize: () => ipcRenderer.invoke('window:unmaximize'),
+    toggleMaximize: () => ipcRenderer.invoke('window:toggleMaximize'),
+    isMaximized: () => ipcRenderer.invoke('window:isMaximized'),
+    close: () => ipcRenderer.invoke('window:close')
   },
   
   // 任务进度推送监听
@@ -90,6 +101,12 @@ const api = {
     const handler = (_event: any, data: any) => callback(data)
     ipcRenderer.on('stitch:exportProgress', handler)
     return () => ipcRenderer.removeListener('stitch:exportProgress', handler)
+  },
+
+  onWindowMaximizedChange: (callback: (isMaximized: boolean) => void) => {
+    const handler = (_event: any, isMaximized: boolean) => callback(isMaximized)
+    ipcRenderer.on('window:maximized', handler)
+    return () => ipcRenderer.removeListener('window:maximized', handler)
   }
 }
 

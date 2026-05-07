@@ -16,6 +16,8 @@ const scannedDir = ref('')
 const binViewMode = ref<'grid' | 'list'>('grid')
 const binSearchQuery = ref('')
 const selectedMediaPath = ref<string | null>(null)
+const draggedMediaPath = ref<string | null>(null)
+const isTimelineDragOver = ref(false)
 
 const timelineClips = ref<StitchClip[]>([])
 const selectedClipId = ref<number | null>(null)
@@ -136,7 +138,7 @@ const recalcTimelineStarts = () => {
   }
 }
 
-const handleAddToTimeline = async (media: VideoMeta) => {
+const handleAddToTimeline = async (media: VideoMeta, insertIndex?: number) => {
   let duration = media.duration
   if (!duration || duration === 0) {
     duration = await getNativeDuration(media.path, media.url)
@@ -147,8 +149,8 @@ const handleAddToTimeline = async (media: VideoMeta) => {
     }
   }
 
-  const id = Date.now()
-  timelineClips.value.push({
+  const id = Date.now() + Math.floor(Math.random() * 1000)
+  const clip: StitchClip = {
     id,
     sourceId: media.path,
     sourcePath: media.path,
@@ -159,8 +161,60 @@ const handleAddToTimeline = async (media: VideoMeta) => {
     trimStart: 0,
     trimEnd: duration,
     timelineStart: totalDuration.value
-  })
+  }
+  if (typeof insertIndex === 'number') {
+    timelineClips.value.splice(Math.max(0, Math.min(insertIndex, timelineClips.value.length)), 0, clip)
+    recalcTimelineStarts()
+  } else {
+    timelineClips.value.push(clip)
+  }
   selectedClipId.value = id
+}
+
+const handleMediaDragStart = (media: VideoMeta, e: DragEvent) => {
+  selectedMediaPath.value = media.path
+  draggedMediaPath.value = media.path
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'copy'
+    e.dataTransfer.setData('application/x-cinecho-media-path', media.path)
+    e.dataTransfer.setData('text/plain', media.path)
+  }
+}
+
+const handleMediaDragEnd = () => {
+  draggedMediaPath.value = null
+  isTimelineDragOver.value = false
+}
+
+const getTimelineInsertIndex = (e: DragEvent) => {
+  const target = e.currentTarget as HTMLElement
+  const rect = target.getBoundingClientRect()
+  const dropTime = Math.max(0, (e.clientX - rect.left) / pxPerSecond.value)
+
+  for (let i = 0; i < timelineClips.value.length; i++) {
+    const clip = timelineClips.value[i]
+    const midpoint = clip.timelineStart + clipDuration(clip) / 2
+    if (dropTime < midpoint) return i
+  }
+  return timelineClips.value.length
+}
+
+const handleTimelineDragOver = (e: DragEvent) => {
+  e.preventDefault()
+  isTimelineDragOver.value = true
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+}
+
+const handleTimelineDrop = async (e: DragEvent) => {
+  e.preventDefault()
+  const mediaPath = e.dataTransfer?.getData('application/x-cinecho-media-path') || draggedMediaPath.value
+  isTimelineDragOver.value = false
+  draggedMediaPath.value = null
+  if (!mediaPath) return
+
+  const media = mediaPool.value.find(item => item.path === mediaPath)
+  if (!media) return
+  await handleAddToTimeline(media, getTimelineInsertIndex(e))
 }
 
 const handleSelectClip = (id: number) => { selectedClipId.value = id }
@@ -564,6 +618,9 @@ onDeactivated(() => {
               :key="media.path"
               @click="selectedMediaPath = media.path"
               @dblclick="handleAddToTimeline(media)"
+              :draggable="true"
+              @dragstart="handleMediaDragStart(media, $event)"
+              @dragend="handleMediaDragEnd"
               class="relative rounded-lg overflow-hidden cursor-pointer transition-all group border-2"
               :class="[
                 selectedMediaPath === media.path
@@ -609,6 +666,9 @@ onDeactivated(() => {
               :key="media.path"
               @click="selectedMediaPath = media.path"
               @dblclick="handleAddToTimeline(media)"
+              :draggable="true"
+              @dragstart="handleMediaDragStart(media, $event)"
+              @dragend="handleMediaDragEnd"
               class="flex items-center gap-2.5 p-2 rounded-lg cursor-pointer transition-all group border"
               :class="[
                 selectedMediaPath === media.path
@@ -718,7 +778,7 @@ onDeactivated(() => {
     </div>
 
     <!-- ═══ Bottom: Timeline Panel ═══ -->
-    <div class="h-[220px] shrink-0 border-t border-[var(--border-color)] bg-[var(--bg-secondary)] flex flex-col">
+    <div class="h-[160px] shrink-0 border-t border-[var(--border-color)] bg-[var(--bg-secondary)] flex flex-col">
 
       <!-- Timeline toolbar -->
       <div class="h-[34px] shrink-0 border-b border-[var(--border-color)] flex items-center justify-between px-3 bg-[var(--bg-card)]">
@@ -770,17 +830,26 @@ onDeactivated(() => {
             <div class="h-[56px] flex items-center justify-center border-b border-[var(--border-color)]">
               <span class="text-[9px] font-bold text-blue-400 tracking-wider">V1</span>
             </div>
-            <div class="h-[40px] flex items-center justify-center border-b border-[var(--border-color)]">
+            <div class="h-[40px] flex items-center justify-center">
               <span class="text-[9px] font-bold text-emerald-400 tracking-wider">A1</span>
-            </div>
-            <div class="flex-1 flex items-center justify-center">
-              <span class="text-[9px] font-bold text-[var(--text-tertiary)] tracking-wider">V2</span>
             </div>
           </div>
 
           <!-- ── Video Track V1 ── -->
-          <div class="h-[56px] relative ml-[60px] border-b border-[var(--border-color)]">
+          <div
+            class="h-[56px] relative ml-[60px] border-b border-[var(--border-color)]"
+            @dragover="handleTimelineDragOver"
+            @dragleave="isTimelineDragOver = false"
+            @drop="handleTimelineDrop"
+          >
             <div class="absolute inset-0 bg-[var(--bg-primary)]"></div>
+            <div
+              v-if="isTimelineDragOver"
+              class="absolute inset-0 border border-dashed border-blue-400/70 bg-blue-500/10 pointer-events-none z-10"
+            ></div>
+            <div v-if="!timelineClips.length" class="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <span class="text-[9px] text-[var(--text-tertiary)] font-medium">拖拽素材到时间线 Drop clips here</span>
+            </div>
             <div
               v-for="clip in timelineClips"
               :key="clip.id"
@@ -814,8 +883,17 @@ onDeactivated(() => {
           </div>
 
           <!-- ── Audio Track A1 ── -->
-          <div class="h-[40px] relative ml-[60px] border-b border-[var(--border-color)]">
+          <div
+            class="h-[40px] relative ml-[60px]"
+            @dragover="handleTimelineDragOver"
+            @dragleave="isTimelineDragOver = false"
+            @drop="handleTimelineDrop"
+          >
             <div class="absolute inset-0 bg-[var(--bg-primary)]/80"></div>
+            <div
+              v-if="isTimelineDragOver"
+              class="absolute inset-0 border border-dashed border-blue-400/70 bg-blue-500/10 pointer-events-none z-10"
+            ></div>
             <div
               v-for="clip in timelineClips"
               :key="'a-' + clip.id"
@@ -833,14 +911,6 @@ onDeactivated(() => {
                   :style="{ height: (12 + Math.random() * 18) + 'px' }"
                 ></div>
               </div>
-            </div>
-          </div>
-
-          <!-- ── Empty Track V2 ── -->
-          <div class="flex-1 relative ml-[60px]">
-            <div class="absolute inset-0 bg-[var(--bg-primary)]"></div>
-            <div class="absolute inset-0 flex items-center justify-center">
-              <span class="text-[9px] text-[var(--text-tertiary)] font-medium">拖拽素材到此轨道 Drop clips here</span>
             </div>
           </div>
 

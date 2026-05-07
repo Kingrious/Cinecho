@@ -1,0 +1,3 @@
+(node:10424) electron: Failed to load URL: http://localhost:5173/ with error: ERR_CONNECTION_REFUSED
+(Use `electron --trace-warnings ...` to show where the warning was created)
+[10424:0506/125419.185:ERROR:mojo\public\cpp\bindings\lib\interface_endpoint_client.cc:748] Message 0 rejected by interface blink.mojom.WidgetHost

@@ -57,8 +57,8 @@ export interface GenerateVideoOptions {
   cameraFixed?: boolean
   watermark?: boolean
   referenceImagePaths?: string[]
+  referenceFrameRoles?: Array<'first_frame' | 'reference_frame' | 'last_frame'>
   cameraMotion?: string
-  actionType?: string
   storyboardId?: string
   storyboardName?: string
   storyboardShotOrder?: number[]
@@ -80,6 +80,7 @@ export interface VideoModel {
   description: string
   maxDuration: number
   supportsImageInput: boolean
+  supportsFirstLastFrame: boolean
 }
 
 export const VIDEO_MODELS: VideoModel[] = [
@@ -88,14 +89,16 @@ export const VIDEO_MODELS: VideoModel[] = [
     name: 'Seedance 1.0 Pro Fast',
     description: '快速视频生成模型，支持 1080p 高质量输出',
     maxDuration: 10,
-    supportsImageInput: true
+    supportsImageInput: true,
+    supportsFirstLastFrame: false
   },
   {
     id: 'doubao-seedance-1-5-pro-251215',
     name: 'Seedance 1.5 Pro',
     description: '高质量视频生成模型，支持图生视频',
     maxDuration: 10,
-    supportsImageInput: true
+    supportsImageInput: true,
+    supportsFirstLastFrame: true
   }
 ]
 
@@ -137,6 +140,10 @@ export interface StoryboardShot {
   index: number
   status: AssetStatus
   prompt: string
+  content?: string
+  lens?: string
+  move?: string
+  actor?: string
   imagePath?: string
   imageUrl?: string
   sourceImageUrl?: string
@@ -178,6 +185,12 @@ export interface GenerateStoryboardShotOptions {
   roleAssetPaths?: string[]
   costumeAssetPaths?: string[]
   sceneAssetPaths?: string[]
+}
+
+export interface UpdateStoryboardOptions {
+  storyboardId: string
+  name?: string
+  shots: StoryboardShot[]
 }
 
 export interface StitchClip {

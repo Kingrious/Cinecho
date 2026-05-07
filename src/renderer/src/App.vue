@@ -1,9 +1,21 @@
 <template>
   <div class="flex flex-col h-screen w-full overflow-hidden" :data-theme="currentTheme">
-    <header class="w-full h-[52px] border-b backdrop-blur-xl flex items-center justify-between px-4 shadow-sm shrink-0 z-10 relative" :style="{ backgroundColor: 'var(--header-bg)', borderColor: 'var(--border-color)' }">
+    <header class="app-drag-region w-full h-[52px] border-b backdrop-blur-xl flex items-center justify-between px-4 shadow-sm shrink-0 z-10 relative" :style="{ backgroundColor: 'var(--header-bg)', borderColor: 'var(--border-color)' }">
       <div class="flex items-center gap-3">
         <div class="w-7 h-7 rounded bg-gradient-to-br from-blue-500 to-purple-600 shadow-lg shadow-blue-500/20"></div>
         <h1 class="text-sm font-semibold tracking-wide text-[var(--accent-color)]">Cinecho 1.0</h1>
+      </div>
+      <div class="window-controls no-drag">
+        <button class="win-btn" type="button" aria-label="Minimize" @click="handleMinimize">
+          <Minus :size="14" />
+        </button>
+        <button class="win-btn" type="button" :aria-label="isMaximized ? 'Restore' : 'Maximize'" @click="handleToggleMaximize">
+          <Copy v-if="isMaximized" :size="12" />
+          <Square v-else :size="12" />
+        </button>
+        <button class="win-btn win-btn-close" type="button" aria-label="Close" @click="handleClose">
+          <X :size="14" />
+        </button>
       </div>
     </header>
 
@@ -48,17 +60,25 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { storeApi } from './api/media'
+import { Copy, Minus, Square, X } from 'lucide-vue-next'
+import { storeApi, windowApi } from './api/media'
 import AppDialogHost from './components/AppDialogHost.vue'
 
-const currentTheme = ref('dark')
+const currentTheme = ref('light')
+const isMaximized = ref(false)
+let removeWindowMaximizedListener: (() => void) | undefined
 
 onMounted(() => {
   loadTheme()
+  loadWindowState()
+  removeWindowMaximizedListener = windowApi.onMaximizedChange((value) => {
+    isMaximized.value = value
+  })
   window.addEventListener('theme-change', handleThemeChange as EventListener)
 })
 
 onUnmounted(() => {
+  removeWindowMaximizedListener?.()
   window.removeEventListener('theme-change', handleThemeChange as EventListener)
 })
 
@@ -86,6 +106,38 @@ const saveTheme = async (theme: string) => {
   }
 }
 
+const loadWindowState = async () => {
+  try {
+    isMaximized.value = await windowApi.isMaximized()
+  } catch {
+    isMaximized.value = false
+  }
+}
+
+const handleMinimize = async () => {
+  try {
+    await windowApi.minimize()
+  } catch (error) {
+    console.error('Failed to minimize window:', error)
+  }
+}
+
+const handleToggleMaximize = async () => {
+  try {
+    isMaximized.value = await windowApi.toggleMaximize()
+  } catch (error) {
+    console.error('Failed to toggle maximize:', error)
+  }
+}
+
+const handleClose = async () => {
+  try {
+    await windowApi.close()
+  } catch (error) {
+    console.error('Failed to close window:', error)
+  }
+}
+
 defineExpose({
   setTheme: (theme: string) => {
     currentTheme.value = theme
@@ -96,6 +148,44 @@ defineExpose({
 </script>
 
 <style scoped>
+.app-drag-region {
+  -webkit-app-region: drag;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+.window-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.win-btn {
+  width: 1.75rem;
+  height: 1.75rem;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 0.375rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.win-btn:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.win-btn-close:hover {
+  background-color: #ef4444;
+  color: #fff;
+}
+
 .nav-link {
   @apply flex flex-col items-center gap-1 p-2 rounded-lg transition-all duration-200 min-w-[4rem];
   color: var(--text-tertiary);
