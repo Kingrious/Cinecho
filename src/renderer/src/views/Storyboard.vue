@@ -192,6 +192,27 @@ const scheduleSave = () => {
   }, 600)
 }
 
+const handleDeleteStoryboard = async () => {
+  if (!currentStoryboard.value) return
+  const ok = await dialog.confirm(
+    `确定删除分镜脚本「${currentStoryboard.value.name}」吗？此操作不可撤销。`,
+    '删除分镜脚本',
+    '删除'
+  )
+  if (!ok) return
+  isLoading.value = true
+  try {
+    await storyboardApi.delete(currentStoryboard.value.id)
+    storyboards.value = storyboards.value.filter(item => item.id !== currentStoryboard.value!.id)
+    applyStoryboard(storyboards.value[0] || null)
+  } catch (error: any) {
+    console.error('[Storyboard] delete failed:', error)
+    await dialog.error(`删除分镜失败：${error?.message || '未知错误'}`)
+  } finally {
+    isLoading.value = false
+  }
+}
+
 const handleCreateStoryboard = async () => {
   isLoading.value = true
   try {
@@ -435,6 +456,17 @@ onUnmounted(() => {
               </select>
               <ChevronDown class="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-tertiary)]" />
             </div>
+
+            <button
+              class="toolbar-button danger-button"
+              type="button"
+              title="删除当前分镜脚本"
+              :disabled="isLoading || !hasStoryboard"
+              @click="handleDeleteStoryboard"
+            >
+              <Trash2 class="h-4 w-4" />
+              <span>删除脚本</span>
+            </button>
 
             <button class="toolbar-button" type="button" title="刷新" :disabled="isLoading" @click="refreshAll">
               <RefreshCw class="h-4 w-4" :class="{ 'animate-spin': isLoading }" />
@@ -737,6 +769,12 @@ onUnmounted(() => {
   border-color: rgba(96, 165, 250, 0.35);
   background: var(--bg-tertiary);
   color: var(--text-primary);
+}
+
+.toolbar-button.danger-button:hover:not(:disabled) {
+  border-color: rgba(239, 68, 68, 0.45);
+  background: rgba(239, 68, 68, 0.08);
+  color: rgb(239, 68, 68);
 }
 
 .toolbar-button:disabled,
