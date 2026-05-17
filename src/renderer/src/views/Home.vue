@@ -2,7 +2,7 @@
 import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import { mediaApi, storeApi, storyboardApi } from '../api/media'
 import { useDialog } from '../composables/useDialog'
-import type { GenerateVideoOptions, StoryboardAsset, StoryboardShot, VideoAsset } from '../types/media'
+import type { GenerateVideoOptions, StoryboardAsset, StoryboardShot, VideoAsset, VideoGenerationMode, VideoRatio, VideoResolution } from '../types/media'
 import { VIDEO_MODELS } from '../types/media'
 
 const dialog = useDialog()
@@ -21,8 +21,13 @@ const selectedModel = ref('doubao-seedance-1-0-pro-fast-251015')
 const selectedVideoProvider = ref('ark')
 const selectedStoryboardId = ref('')
 const duration = ref(5)
-const resolution = ref<'720p' | '1080p'>('1080p')
+const resolution = ref<VideoResolution>('1080p')
+const ratio = ref<VideoRatio>('16:9')
+const generationMode = ref<VideoGenerationMode>('image_first')
 const watermark = ref(false)
+const generateAudio = ref(false)
+const returnLastFrame = ref(false)
+const cameraFixed = ref(false)
 type FrameRole = 'first' | 'last' | 'reference1' | 'reference2' | 'reference3'
 interface FrameSlot {
   role: FrameRole
@@ -55,52 +60,84 @@ const CAMERA_MOTION_OPTIONS = [
 ]
 const cameraMotion = ref(CAMERA_MOTION_OPTIONS[0].value)
 
-const MODEL_DURATION_OPTIONS: Record<string, number[]> = {
-  'doubao-seedance-1-0-pro-fast-251015': [5, 10],
-  'doubao-seedance-1-5-pro-251215': [5, 10]
-}
-
-const VIDEO_PROMPT_MODEL_CONFIG: Record<string, { imageMode: 'first_frame' | 'first_last_frame'; maxReferenceFrames: number }> = {
-  'doubao-seedance-1-0-pro-fast-251015': { imageMode: 'first_frame', maxReferenceFrames: 1 },
-  'doubao-seedance-1-5-pro-251215': { imageMode: 'first_last_frame', maxReferenceFrames: 2 }
-}
+const ALL_GENERATION_MODES: Array<{ value: VideoGenerationMode; label: string; short: string }> = [
+  { value: 'text_to_video', label: '文生', short: 'TEXT' },
+  { value: 'image_first', label: '首帧', short: 'FIRST' },
+  { value: 'image_first_last', label: '首尾帧', short: 'FIRST/LAST' },
+  { value: 'multimodal', label: '多模态', short: 'MULTI' },
+  { value: 'edit', label: '编辑', short: 'EDIT' },
+  { value: 'extend', label: '延长', short: 'EXTEND' }
+]
+const ALL_DURATIONS = Array.from({ length: 14 }, (_, index) => index + 2)
+const ALL_RESOLUTIONS: VideoResolution[] = ['480p', '720p', '1080p']
+const ALL_RATIOS: VideoRatio[] = ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9']
 
 const selectedModelInfo = computed(() => VIDEO_MODELS.find(m => m.id === selectedModel.value))
-const availableDurations = computed(() => MODEL_DURATION_OPTIONS[selectedModel.value] || [5])
+const availableDurations = computed(() => selectedModelInfo.value?.durationOptions || [5])
+const availableResolutions = computed(() => selectedModelInfo.value?.supportedResolutions || ['720p'])
+const availableModes = computed(() => selectedModelInfo.value?.supportsModes || ['text_to_video'])
 const modelSupportsFirstLastFrame = computed(() => Boolean(selectedModelInfo.value?.supportsFirstLastFrame))
 const modelFirstLastFrameLabel = computed(() => (
   modelSupportsFirstLastFrame.value ? '支持首尾帧' : '不支持首尾帧'
 ))
+const modelSupportsMode = (mode: VideoGenerationMode) => availableModes.value.includes(mode)
+const modelSupportsResolution = (value: VideoResolution) => availableResolutions.value.includes(value)
+const modelSupportsDuration = (value: number) => availableDurations.value.includes(value)
 const selectedStoryboard = computed(() => storyboards.value.find(item => item.id === selectedStoryboardId.value) || null)
 const readyShots = computed(() => selectedStoryboard.value?.shots.filter(shot => shot.imagePath) || [])
 const activeFrameSlots = computed<FrameSlot[]>(() => (
-  modelSupportsFirstLastFrame.value
+  generationMode.value === 'image_first_last'
     ? [
         { role: 'first', title: '首帧', placeholder: '拖入开场镜头', code: 'FIRST FRAME' },
-        { role: 'last', title: '尾帧', placeholder: '拖入结尾镜头', code: 'LAST FRAME' },
-        { role: 'reference1', title: '参考帧', placeholder: '拖入参考镜头', code: 'REFERENCE FRAME' }
+        { role: 'last', title: '尾帧', placeholder: '拖入结尾镜头', code: 'LAST FRAME' }
       ]
-    : [
-        { role: 'reference1', title: '参考帧 1', placeholder: '拖入参考镜头', code: 'REFERENCE 1' },
-        { role: 'reference2', title: '参考帧 2', placeholder: '拖入参考镜头', code: 'REFERENCE 2' },
-        { role: 'reference3', title: '参考帧 3', placeholder: '拖入参考镜头', code: 'REFERENCE 3' }
-      ]
+    : generationMode.value === 'text_to_video'
+      ? []
+      : generationMode.value === 'image_first'
+        ? [
+            { role: 'first', title: '首帧', placeholder: '拖入首帧镜头', code: 'FIRST FRAME' }
+          ]
+        : [
+            { role: 'reference1', title: '参考帧 1', placeholder: '拖入参考镜头', code: 'REFERENCE 1' },
+            { role: 'reference2', title: '参考帧 2', placeholder: '拖入参考镜头', code: 'REFERENCE 2' },
+            { role: 'reference3', title: '参考帧 3', placeholder: '拖入参考镜头', code: 'REFERENCE 3' }
+          ]
 ))
 const selectedFrameShots = computed(() => activeFrameSlots.value
   .map(slot => frameShots.value[slot.role])
   .filter(Boolean) as StoryboardShot[])
-const selectedVideoModelConfig = computed(() => VIDEO_PROMPT_MODEL_CONFIG[selectedModel.value] || { imageMode: 'first_frame', maxReferenceFrames: 1 })
-const sentReferenceFrameCount = computed(() => Math.min(selectedFrameShots.value.length, selectedVideoModelConfig.value.maxReferenceFrames))
+const currentModeLabel = computed(() => ALL_GENERATION_MODES.find(mode => mode.value === generationMode.value)?.label || '生成')
+const activeModeNeedsImage = computed(() => generationMode.value !== 'text_to_video')
+const selectedVideoModelMaxFrames = computed(() => {
+  if (generationMode.value === 'text_to_video') return 0
+  if (generationMode.value === 'image_first') return 1
+  if (generationMode.value === 'image_first_last') return 2
+  return Math.min(selectedModelInfo.value?.maxReferenceImages || 1, 3)
+})
+const sentReferenceFrameCount = computed(() => Math.min(selectedFrameShots.value.length, selectedVideoModelMaxFrames.value))
 const selectedFrameRoles = computed(() => activeFrameSlots.value
   .filter(slot => frameShots.value[slot.role])
   .map(slot => slot.role === 'first'
     ? 'first_frame'
     : slot.role === 'last'
       ? 'last_frame'
-      : 'reference_frame') as Array<'first_frame' | 'reference_frame' | 'last_frame'>)
+      : 'reference_image') as Array<'first_frame' | 'reference_image' | 'last_frame'>)
 const hasSelectedFrames = computed(() => selectedFrameShots.value.length > 0)
 const hasMotionText = computed(() => prompt.value.trim().length > 0)
-const canGenerate = computed(() => Boolean(selectedStoryboard.value && (hasSelectedFrames.value || hasMotionText.value)))
+const hasRequiredFrameSelection = computed(() => {
+  if (!activeModeNeedsImage.value) return true
+  if (generationMode.value === 'image_first_last') {
+    return Boolean(frameShots.value.first && frameShots.value.last)
+  }
+  return hasSelectedFrames.value
+})
+const selectedModeAvailable = computed(() => modelSupportsMode(generationMode.value))
+const canGenerate = computed(() => Boolean(
+  selectedStoryboard.value &&
+  selectedModeAvailable.value &&
+  hasRequiredFrameSelection.value &&
+  (hasSelectedFrames.value || hasMotionText.value)
+))
 const completedStoryboardCount = computed(() => storyboards.value.filter(item => item.completedCount > 0).length)
 const selectedVideoUrl = computed(() => selectedVideo.value ? getPlayableVideoUrl(selectedVideo.value) : '')
 
@@ -331,30 +368,34 @@ const addShotToNextFrame = (shot: StoryboardShot) => {
 }
 
 const buildStoryboardVideoPrompt = () => {
-  const storyboard = selectedStoryboard.value
   const frameDescriptions = selectedFrameShots.value
     .map((shot, index) => {
       const slot = activeFrameSlots.value.find(item => frameShots.value[item.role]?.index === shot.index)
       const frameLabel = slot?.role === 'first'
-        ? 'First frame'
+        ? 'Opening image'
         : slot?.role === 'last'
-          ? 'Last frame'
-          : `Reference frame ${index + 1}`
-      return `${frameLabel}: storyboard shot #${shot.index}. ${shot.prompt || 'Continue the visual story.'}`
+          ? 'Ending image'
+          : `Reference image ${index + 1}`
+      const shotNote = shot.prompt?.trim()
+      return shotNote ? `${frameLabel}: ${shotNote}` : frameLabel
     })
     .join('\n')
-  const motionScript = prompt.value.trim() || 'Create a coherent cinematic shot sequence with natural transitions between the selected storyboard frames.'
+  const defaultMotion = generationMode.value === 'image_first_last'
+    ? 'Animate a natural transition from the opening image to the ending image.'
+    : 'Add natural motion that fits the image and scene.'
+  const motionScript = prompt.value.trim() || defaultMotion
   const referenceInstruction = !hasSelectedFrames.value
-    ? 'No image reference frames were selected. Generate the video from the motion script only.'
-    : modelSupportsFirstLastFrame.value
-      ? 'Use the first frame as the opening image reference, the last frame as the ending image reference, and the reference frame as visual continuity guidance when present.'
-      : 'Use the selected reference frames as visual guidance. Preserve character identity, costume, environment, and visual style from the references.'
+    ? 'Text-to-video: follow the motion instruction directly.'
+    : generationMode.value === 'image_first_last'
+      ? 'Image order: image 1 is the opening frame; image 2 is the ending frame.'
+      : generationMode.value === 'image_first'
+        ? 'Image order: image 1 is the opening frame. Continue from that visual state.'
+        : 'Use the provided images as visual anchors in their given order.'
   return [
-    `Create a cinematic video from the selected storyboard "${storyboard?.name || ''}".`,
+    `Create a cinematic ${currentModeLabel.value} video.`,
     referenceInstruction,
-    'Preserve character identity, costume color, environment continuity, framing intent, and visual style across the whole video.',
-    frameDescriptions,
-    `Motion script: ${motionScript}`
+    frameDescriptions ? `Image notes:\n${frameDescriptions}` : '',
+    `Motion: ${motionScript}`
   ].filter(Boolean).join('\n')
 }
 
@@ -365,9 +406,9 @@ const buildFinalVideoPrompt = (basePrompt: string) => {
   }
   if (sentReferenceFrameCount.value > 0) {
     const imgCount = sentReferenceFrameCount.value
-    const fidelityPrefix = `Strictly use ONLY the character(s) shown in the reference image${imgCount > 1 ? 's' : ''}. ` +
-      `Do NOT add, replace or invent any new characters not present in the reference. ` +
-      `Preserve the exact appearance, gender, face, clothing, and style of the person${imgCount > 1 ? 's' : ''} in the reference image${imgCount > 1 ? 's' : ''}. `
+    const fidelityPrefix = `Use the provided reference image${imgCount > 1 ? 's' : ''} as visual anchor${imgCount > 1 ? 's' : ''}. ` +
+      'Keep the same main subject, outfit, environment, and visual style. ' +
+      'Do not introduce new main characters unless requested. '
     fullPrompt = `${fidelityPrefix}${fullPrompt}`
   }
   return fullPrompt
@@ -397,6 +438,14 @@ const handleGenerate = async () => {
     await dialog.error('请先选择一个分镜头。')
     return
   }
+  if (!selectedModeAvailable.value) {
+    await dialog.error(`${selectedModelInfo.value?.name || '当前模型'} 不支持 ${currentModeLabel.value} 模式。`)
+    return
+  }
+  if (!hasRequiredFrameSelection.value) {
+    await dialog.error(`${currentModeLabel.value} 模式需要先选择对应的参考帧。`)
+    return
+  }
   if (!hasSelectedFrames.value && !hasMotionText.value) {
     await dialog.error('未输入图片时，必须填写文本描述。')
     return
@@ -414,7 +463,12 @@ const handleGenerate = async () => {
       videoName: videoName.value.trim() || undefined,
       duration: duration.value,
       resolution: resolution.value,
+      ratio: ratio.value,
+      generationMode: generationMode.value,
       watermark: watermark.value,
+      generateAudio: generateAudio.value,
+      returnLastFrame: returnLastFrame.value,
+      cameraFixed: cameraFixed.value,
       referenceImagePaths: frameShots.map(shot => shot.imagePath!).filter(Boolean),
       referenceFrameRoles: selectedFrameRoles.value,
       cameraMotion: cameraMotion.value || undefined,
@@ -470,8 +524,22 @@ onActivated(() => {
 })
 
 watch(selectedModel, () => {
-  if (!availableDurations.value.includes(duration.value)) {
-    duration.value = availableDurations.value[0]
+  const config = selectedModelInfo.value
+  if (!config) return
+  if (!availableModes.value.includes(generationMode.value)) generationMode.value = config.supportsModes[0] || 'text_to_video'
+  if (!availableDurations.value.includes(duration.value)) duration.value = config.defaultDuration
+  if (!availableResolutions.value.includes(resolution.value)) resolution.value = config.defaultResolution
+  ratio.value = config.defaultRatio
+  if (!config.supportsAudioGeneration) generateAudio.value = false
+  if (!config.supportsReturnLastFrame) returnLastFrame.value = false
+  if (!config.supportsCameraFixed) cameraFixed.value = false
+})
+
+watch(generationMode, () => {
+  for (const role of Object.keys(frameShots.value) as FrameRole[]) {
+    if (!activeFrameSlots.value.some(slot => slot.role === role)) {
+      frameShots.value[role] = null
+    }
   }
 })
 </script>
@@ -602,13 +670,38 @@ watch(selectedModel, () => {
             <p class="text-[9px] text-[var(--text-tertiary)] mt-1">{{ selectedModelInfo?.description }} · {{ modelFirstLastFrameLabel }}</p>
           </div>
 
+          <div class="flex flex-col gap-2">
+            <div class="flex items-center justify-between">
+              <label class="text-[10px] font-bold text-[var(--text-tertiary)]">生成模式 MODE</label>
+              <span class="text-[9px] text-[var(--text-tertiary)]">{{ currentModeLabel }}</span>
+            </div>
+            <div class="grid grid-cols-3 gap-1.5">
+              <button
+                v-for="mode in ALL_GENERATION_MODES"
+                :key="mode.value"
+                type="button"
+                :disabled="!modelSupportsMode(mode.value)"
+                :title="mode.label"
+                @click="generationMode = mode.value"
+                :class="[
+                  'min-h-[40px] rounded-md border px-2 py-1.5 text-center transition-colors',
+                  generationMode === mode.value ? 'border-blue-400 bg-blue-600 text-white shadow-[0_0_14px_rgba(37,99,235,0.32)]' : 'border-[var(--border-color)] bg-[var(--bg-card)] text-[var(--text-secondary)] hover:border-blue-400/50',
+                  !modelSupportsMode(mode.value) ? 'opacity-35 cursor-not-allowed hover:border-[var(--border-color)]' : ''
+                ]"
+              >
+                <div class="text-[10px] font-bold leading-none">{{ mode.label }}</div>
+                <div :class="['mt-1 text-[8px] font-mono', generationMode === mode.value ? 'text-blue-100/85' : 'text-[var(--text-tertiary)]']">{{ mode.short }}</div>
+              </button>
+            </div>
+          </div>
+
           <div class="flex flex-col gap-3">
             <div class="flex justify-between items-center">
               <label class="text-[10px] font-bold text-[var(--text-tertiary)]">首尾 / 参考帧 FIRST / LAST / REFERENCE</label>
               <span class="text-[9px] text-[var(--text-tertiary)] font-mono">{{ selectedFrameShots.length }}/{{ activeFrameSlots.length }}</span>
             </div>
 
-            <div class="grid grid-cols-3 gap-2">
+            <div v-if="activeFrameSlots.length" class="grid grid-cols-3 gap-2">
               <div
                 v-for="slot in activeFrameSlots"
                 :key="slot.role"
@@ -646,8 +739,11 @@ watch(selectedModel, () => {
                 </div>
               </div>
             </div>
+            <div v-else class="rounded-md border border-dashed border-[var(--border-color)] bg-[var(--bg-card)]/60 px-3 py-5 text-center text-[11px] text-[var(--text-tertiary)]">
+              文生模式不需要参考帧
+            </div>
 
-            <div v-if="readyShots.length" class="flex flex-col gap-2">
+            <div v-if="readyShots.length && activeFrameSlots.length" class="flex flex-col gap-2">
               <div class="flex items-center justify-between">
                 <span class="text-[10px] font-bold text-[var(--text-tertiary)]">分镜镜头 SHOTS</span>
                 <span class="text-[9px] text-[var(--text-tertiary)]">拖拽到上方槽位</span>
@@ -676,7 +772,7 @@ watch(selectedModel, () => {
                 </button>
               </div>
             </div>
-            <div v-else class="rounded-md border border-dashed border-[var(--border-color)] px-3 py-4 text-xs text-[var(--text-tertiary)]">
+            <div v-else-if="activeFrameSlots.length" class="rounded-md border border-dashed border-[var(--border-color)] px-3 py-4 text-xs text-[var(--text-tertiary)]">
               当前分镜脚本还没有已生成图片。
             </div>
             <div class="flex flex-col gap-1.5">
@@ -717,16 +813,53 @@ watch(selectedModel, () => {
                 <label class="text-[10px] font-bold text-[var(--text-tertiary)]">时长</label>
                 <span class="text-[10px] font-bold text-blue-400 font-mono">{{ duration }}s</span>
               </div>
-              <div class="flex bg-[var(--bg-card)] rounded-md p-1 border border-[var(--border-color)] shadow-inner">
-                <button v-for="d in availableDurations" :key="d" @click="duration = d" :class="['flex-1 py-1 text-xs font-bold rounded transition-colors', duration === d ? 'bg-[var(--bg-tertiary)] text-[var(--text-primary)] shadow-sm border border-[var(--border-color)]' : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]']">{{ d }}</button>
+              <div class="grid grid-cols-4 gap-1 bg-[var(--bg-card)] rounded-md p-1 border border-[var(--border-color)] shadow-inner">
+                <button
+                  v-for="d in ALL_DURATIONS"
+                  :key="d"
+                  type="button"
+                  :disabled="!modelSupportsDuration(d)"
+                  @click="duration = d"
+                  :class="[
+                    'border border-transparent py-1 text-xs font-bold rounded transition-colors',
+                    duration === d ? 'border-blue-400 bg-blue-600 text-white shadow-[0_0_10px_rgba(37,99,235,0.28)]' : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]',
+                    !modelSupportsDuration(d) ? 'opacity-30 cursor-not-allowed hover:text-[var(--text-tertiary)]' : ''
+                  ]"
+                >{{ d }}</button>
               </div>
             </div>
             <div class="flex flex-col gap-1.5">
               <label class="text-[10px] font-bold text-[var(--text-tertiary)]">分辨率</label>
-              <div class="flex bg-[var(--bg-card)] rounded-md p-1 border border-[var(--border-color)] shadow-inner">
-                <button @click="resolution = '720p'" :class="['flex-1 py-1 text-xs font-bold rounded transition-colors', resolution === '720p' ? 'bg-[var(--bg-tertiary)] text-[var(--text-primary)] shadow-sm border border-[var(--border-color)]' : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]']">720p</button>
-                <button @click="resolution = '1080p'" :class="['flex-1 py-1 text-xs font-bold rounded transition-colors', resolution === '1080p' ? 'bg-[var(--bg-tertiary)] text-[var(--text-primary)] shadow-sm border border-[var(--border-color)]' : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]']">1080p</button>
+              <div class="grid grid-cols-3 gap-1 bg-[var(--bg-card)] rounded-md p-1 border border-[var(--border-color)] shadow-inner">
+                <button
+                  v-for="item in ALL_RESOLUTIONS"
+                  :key="item"
+                  type="button"
+                  :disabled="!modelSupportsResolution(item)"
+                  @click="resolution = item"
+                  :class="[
+                    'border border-transparent py-1 text-xs font-bold rounded transition-colors',
+                    resolution === item ? 'border-blue-400 bg-blue-600 text-white shadow-[0_0_10px_rgba(37,99,235,0.28)]' : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]',
+                    !modelSupportsResolution(item) ? 'opacity-30 cursor-not-allowed hover:text-[var(--text-tertiary)]' : ''
+                  ]"
+                >{{ item }}</button>
               </div>
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[10px] font-bold text-[var(--text-tertiary)]">画幅 RATIO</label>
+            <div class="grid grid-cols-4 gap-1 bg-[var(--bg-card)] rounded-md p-1 border border-[var(--border-color)] shadow-inner">
+              <button
+                v-for="item in ALL_RATIOS"
+                :key="item"
+                type="button"
+                @click="ratio = item"
+                :class="[
+                  'border border-transparent py-1 text-[10px] font-bold rounded transition-colors',
+                  ratio === item ? 'border-blue-400 bg-blue-600 text-white shadow-[0_0_10px_rgba(37,99,235,0.28)]' : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
+                ]"
+              >{{ item }}</button>
             </div>
           </div>
 
@@ -734,6 +867,18 @@ watch(selectedModel, () => {
             <div class="flex items-center justify-between">
               <label class="text-[10px] font-bold text-[var(--text-tertiary)]">添加水印 WATERMARK</label>
               <input v-model="watermark" type="checkbox" class="w-4 h-4 rounded border-[var(--border-color)] bg-[var(--bg-card)] text-blue-500 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer" />
+            </div>
+            <div class="flex items-center justify-between">
+              <label class="text-[10px] font-bold text-[var(--text-tertiary)]">输出声音 AUDIO</label>
+              <input v-model="generateAudio" :disabled="!selectedModelInfo?.supportsAudioGeneration" type="checkbox" class="w-4 h-4 rounded border-[var(--border-color)] bg-[var(--bg-card)] text-blue-500 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed" />
+            </div>
+            <div class="flex items-center justify-between">
+              <label class="text-[10px] font-bold text-[var(--text-tertiary)]">返回尾帧 LAST FRAME</label>
+              <input v-model="returnLastFrame" :disabled="!selectedModelInfo?.supportsReturnLastFrame" type="checkbox" class="w-4 h-4 rounded border-[var(--border-color)] bg-[var(--bg-card)] text-blue-500 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed" />
+            </div>
+            <div class="flex items-center justify-between">
+              <label class="text-[10px] font-bold text-[var(--text-tertiary)]">固定镜头 CAMERA FIXED</label>
+              <input v-model="cameraFixed" :disabled="!selectedModelInfo?.supportsCameraFixed" type="checkbox" class="w-4 h-4 rounded border-[var(--border-color)] bg-[var(--bg-card)] text-blue-500 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed" />
             </div>
           </div>
 

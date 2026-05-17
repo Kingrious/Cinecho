@@ -53,11 +53,16 @@ export interface GenerateVideoOptions {
   provider?: string
   videoName?: string
   duration?: number
-  resolution?: '720p' | '1080p'
+  resolution?: VideoResolution
+  ratio?: VideoRatio
+  generationMode?: VideoGenerationMode
   cameraFixed?: boolean
   watermark?: boolean
+  generateAudio?: boolean
+  returnLastFrame?: boolean
+  serviceTier?: 'default' | 'flex'
   referenceImagePaths?: string[]
-  referenceFrameRoles?: Array<'first_frame' | 'reference_frame' | 'last_frame'>
+  referenceFrameRoles?: Array<'first_frame' | 'reference_image' | 'last_frame'>
   cameraMotion?: string
   storyboardId?: string
   storyboardName?: string
@@ -81,24 +86,126 @@ export interface VideoModel {
   maxDuration: number
   supportsImageInput: boolean
   supportsFirstLastFrame: boolean
+  supportsModes: VideoGenerationMode[]
+  supportedResolutions: VideoResolution[]
+  durationRange: [number, number]
+  durationOptions: number[]
+  defaultDuration: number
+  defaultResolution: VideoResolution
+  defaultRatio: VideoRatio
+  supportsFlexTier: boolean
+  supportsAudioGeneration: boolean
+  supportsReturnLastFrame: boolean
+  supportsCameraFixed: boolean
+  maxReferenceImages: number
 }
+
+export type VideoGenerationMode = 'text_to_video' | 'image_first' | 'image_first_last' | 'multimodal' | 'edit' | 'extend'
+export type VideoResolution = '480p' | '720p' | '1080p'
+export type VideoRatio = '16:9' | '4:3' | '1:1' | '3:4' | '9:16' | '21:9' | 'adaptive'
+
+const range = (start: number, end: number) => Array.from({ length: end - start + 1 }, (_, index) => start + index)
 
 export const VIDEO_MODELS: VideoModel[] = [
   {
-    id: 'doubao-seedance-1-0-pro-fast-251015',
-    name: 'Seedance 1.0 Pro Fast',
-    description: '快速视频生成模型，支持 1080p 高质量输出',
-    maxDuration: 10,
+    id: 'doubao-seedance-2-0-260128',
+    name: 'Seedance 2.0',
+    description: '音画同生，支持文生、首帧、首尾帧、多模态、编辑和延长视频',
+    maxDuration: 15,
     supportsImageInput: true,
-    supportsFirstLastFrame: false
+    supportsFirstLastFrame: true,
+    supportsModes: ['text_to_video', 'image_first', 'image_first_last', 'multimodal', 'edit', 'extend'],
+    supportedResolutions: ['480p', '720p', '1080p'],
+    durationRange: [4, 15],
+    durationOptions: range(4, 15),
+    defaultDuration: 5,
+    defaultResolution: '720p',
+    defaultRatio: 'adaptive',
+    supportsFlexTier: false,
+    supportsAudioGeneration: true,
+    supportsReturnLastFrame: true,
+    supportsCameraFixed: false,
+    maxReferenceImages: 9
+  },
+  {
+    id: 'doubao-seedance-2-0-fast-260128',
+    name: 'Seedance 2.0 Fast',
+    description: '音画同生快速模型，支持多模态能力，最高 720p',
+    maxDuration: 15,
+    supportsImageInput: true,
+    supportsFirstLastFrame: true,
+    supportsModes: ['text_to_video', 'image_first', 'image_first_last', 'multimodal', 'edit', 'extend'],
+    supportedResolutions: ['480p', '720p'],
+    durationRange: [4, 15],
+    durationOptions: range(4, 15),
+    defaultDuration: 5,
+    defaultResolution: '720p',
+    defaultRatio: 'adaptive',
+    supportsFlexTier: false,
+    supportsAudioGeneration: true,
+    supportsReturnLastFrame: true,
+    supportsCameraFixed: false,
+    maxReferenceImages: 9
   },
   {
     id: 'doubao-seedance-1-5-pro-251215',
     name: 'Seedance 1.5 Pro',
-    description: '高质量视频生成模型，支持图生视频',
-    maxDuration: 10,
+    description: '高质量音画同生模型，支持图生视频',
+    maxDuration: 12,
     supportsImageInput: true,
-    supportsFirstLastFrame: true
+    supportsFirstLastFrame: true,
+    supportsModes: ['text_to_video', 'image_first', 'image_first_last'],
+    supportedResolutions: ['480p', '720p', '1080p'],
+    durationRange: [4, 12],
+    durationOptions: range(4, 12),
+    defaultDuration: 5,
+    defaultResolution: '720p',
+    defaultRatio: 'adaptive',
+    supportsFlexTier: true,
+    supportsAudioGeneration: true,
+    supportsReturnLastFrame: true,
+    supportsCameraFixed: true,
+    maxReferenceImages: 2
+  },
+  {
+    id: 'doubao-seedance-1-0-pro-250528',
+    name: 'Seedance 1.0 Pro',
+    description: 'Seedance 1.0 高质量模型，支持首尾帧图生视频',
+    maxDuration: 12,
+    supportsImageInput: true,
+    supportsFirstLastFrame: true,
+    supportsModes: ['text_to_video', 'image_first', 'image_first_last'],
+    supportedResolutions: ['480p', '720p', '1080p'],
+    durationRange: [2, 12],
+    durationOptions: range(2, 12),
+    defaultDuration: 5,
+    defaultResolution: '1080p',
+    defaultRatio: 'adaptive',
+    supportsFlexTier: true,
+    supportsAudioGeneration: false,
+    supportsReturnLastFrame: false,
+    supportsCameraFixed: true,
+    maxReferenceImages: 2
+  },
+  {
+    id: 'doubao-seedance-1-0-pro-fast-251015',
+    name: 'Seedance 1.0 Pro Fast',
+    description: '快速视频生成模型，支持 1080p 高质量输出',
+    maxDuration: 12,
+    supportsImageInput: true,
+    supportsFirstLastFrame: false,
+    supportsModes: ['text_to_video', 'image_first'],
+    supportedResolutions: ['480p', '720p', '1080p'],
+    durationRange: [2, 12],
+    durationOptions: range(2, 12),
+    defaultDuration: 5,
+    defaultResolution: '1080p',
+    defaultRatio: '16:9',
+    supportsFlexTier: true,
+    supportsAudioGeneration: false,
+    supportsReturnLastFrame: false,
+    supportsCameraFixed: true,
+    maxReferenceImages: 1
   }
 ]
 

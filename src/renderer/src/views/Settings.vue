@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { configApi, dialogApi, storeApi, systemApi } from '../api/media'
 import { useDialog } from '../composables/useDialog'
+import { VIDEO_MODELS } from '../types/media'
 
 type ProviderId = 'ark' | 'google' | 'bailian' | 'openrouter' | 'minimax' | 'vidu' | 'fal'
 
@@ -13,7 +14,7 @@ const PROVIDERS: Array<{
   video: boolean
   models: { text?: string[]; image?: string[]; video?: string[] }
 }> = [
-  { id: 'ark', name: 'VolcEngine Ark', text: true, image: true, video: true, models: { text: ['doubao-seed-2-0-lite-260215'], image: ['doubao-seedream-5-0-260128'], video: ['doubao-seedance-1-0-pro-fast-251015', 'doubao-seedance-1-5-pro-251215'] } },
+  { id: 'ark', name: 'VolcEngine Ark', text: true, image: true, video: true, models: { text: ['doubao-seed-2-0-lite-260215'], image: ['doubao-seedream-5-0-260128'], video: VIDEO_MODELS.map(model => model.id) } },
   { id: 'google', name: 'Google AI Studio', text: true, image: true, video: true, models: { text: ['gemini-3-pro-preview'], image: ['gemini-3-pro-image-preview'], video: ['veo-3.1-generate-preview'] } },
   { id: 'bailian', name: 'Alibaba Bailian', text: true, image: false, video: true, models: { text: ['qwen-plus'], video: ['wan2.5-i2v-preview'] } },
   { id: 'openrouter', name: 'OpenRouter', text: true, image: false, video: false, models: { text: ['openai/gpt-5.1'] } },

@@ -7,6 +7,10 @@ import http from 'http'
 import { createReadStream, existsSync } from 'fs'
 import ffmpegStatic from 'ffmpeg-static'
 import ffmpeg from 'fluent-ffmpeg'
+import { createSeedance1VideoTask } from './volcengine/seedance1'
+import { createSeedance2VideoTask } from './volcengine/seedance2'
+import { getVolcVideoModelConfig, type VolcImageRole, type VolcServiceTier, type VolcVideoMode, type VolcVideoRatio, type VolcVideoResolution } from './volcengine/videoModels'
+import { pollVolcVideoTask } from './volcengine/client'
 
 // 存储配置路径
 const STORE_PATH = join(app.getPath('userData'), 'storage.json')
@@ -672,26 +676,6 @@ const DOUBAO_LLM_MODEL = 'doubao-seed-2-0-lite-260215'
 
 // 豆包图像生成 API 配置
 const IMAGE_GENERATE_MODEL = 'doubao-seedream-5-0-260128'  // 使用用户提供的官方模型
-
-// 豆包视频生成 API 配置
-const VIDEO_GENERATE_MODELS = {
-  'doubao-seedance-1-0-pro-fast-251015': {
-    name: 'Seedance 1.0 Pro Fast',
-    maxDuration: 10,
-    defaultResolution: '1080p',
-    supportedDurations: [5, 10],
-    imageMode: 'first_frame',
-    maxReferenceFrames: 1
-  },
-  'doubao-seedance-1-5-pro-251215': {
-    name: 'Seedance 1.5 Pro',
-    maxDuration: 10,
-    defaultResolution: '1080p',
-    supportedDurations: [5, 10],
-    imageMode: 'first_last_frame',
-    maxReferenceFrames: 2
-  }
-}
 
 // 提示词优化的系统指令（严格格式要求）
 const OPTIMIZE_PROMPT_SYSTEM = `你是一个专业的AI图像生成提示词优化助手。你的任务是将用户输入的简短描述优化为详细的图像生成提示词。
@@ -1754,11 +1738,16 @@ interface GenerateVideoOptions {
   provider?: string
   videoName?: string
   duration?: number
-  resolution?: '720p' | '1080p'
+  resolution?: VolcVideoResolution
+  ratio?: VolcVideoRatio
+  generationMode?: VolcVideoMode
   cameraFixed?: boolean
   watermark?: boolean
+  generateAudio?: boolean
+  returnLastFrame?: boolean
+  serviceTier?: VolcServiceTier
   referenceImagePaths?: string[]
-  referenceFrameRoles?: Array<'first_frame' | 'reference_frame' | 'last_frame'>
+  referenceFrameRoles?: Array<VolcImageRole | 'reference_frame'>
   cameraMotion?: string
   storyboardId?: string
   storyboardName?: string
@@ -1777,7 +1766,7 @@ interface GenerateVideoResult {
 
 type VideoContentItem =
   | { type: 'text'; text: string }
-  | { type: 'image_url'; role?: 'first_frame' | 'reference_frame' | 'last_frame'; image_url: { url: string } }
+  | { type: 'image_url'; role?: VolcImageRole; image_url: { url: string } }
 
 const isRemoteHttpUrl = (value?: string) => Boolean(value && /^https?:\/\//i.test(value))
 
@@ -1786,13 +1775,13 @@ type VideoReferenceFrame = {
   source: 'local_data_url' | 'remote_url'
   localPath?: string
   remoteUrl?: string
-  role?: 'first_frame' | 'reference_frame' | 'last_frame'
+  role?: VolcImageRole
 }
 
 type VideoReferenceFrameInput = {
   localPath?: string
   remoteUrl?: string
-  role?: 'first_frame' | 'reference_frame' | 'last_frame'
+  role?: VolcImageRole
 }
 
 const resolveStoryboardFrameUrls = async (options: GenerateVideoOptions) => {
@@ -1809,7 +1798,7 @@ const resolveStoryboardFrameUrls = async (options: GenerateVideoOptions) => {
 const resolveVideoReferenceFrame = async (
   localPath?: string,
   remoteUrl?: string,
-  role?: 'first_frame' | 'reference_frame' | 'last_frame'
+  role?: VolcImageRole
 ): Promise<VideoReferenceFrame | null> => {
   if (localPath) {
     try {
@@ -1845,13 +1834,13 @@ const pickVideoReferenceFrameInputs = (
   referenceImagePaths: string[],
   referenceFrameUrls: string[],
   maxReferenceFrames: number,
-  referenceFrameRoles: Array<'first_frame' | 'reference_frame' | 'last_frame'> = []
+  referenceFrameRoles: Array<VolcImageRole | 'reference_frame'> = []
 ): VideoReferenceFrameInput[] => {
   const count = Math.max(referenceImagePaths.length, referenceFrameUrls.length)
   const inputs = Array.from({ length: count }, (_, index) => ({
     localPath: referenceImagePaths[index],
     remoteUrl: referenceFrameUrls[index],
-    role: referenceFrameRoles[index]
+    role: referenceFrameRoles[index] === 'reference_frame' ? 'reference_image' : referenceFrameRoles[index]
   })).filter(item => item.localPath || item.remoteUrl)
 
   if (inputs.length <= maxReferenceFrames) return inputs
@@ -1952,6 +1941,36 @@ const acquireVideoGenerationSlot = async () => {
   }
 }
 
+const inferVideoGenerationMode = (options: GenerateVideoOptions, referenceFrameCount: number): VolcVideoMode => {
+  if (options.generationMode) return options.generationMode
+  const roles = options.referenceFrameRoles || []
+  if (referenceFrameCount <= 0) return 'text_to_video'
+  if (roles.includes('first_frame') && roles.includes('last_frame')) return 'image_first_last'
+  return 'image_first'
+}
+
+const getMaxFramesForMode = (mode: VolcVideoMode, modelMaxReferenceImages: number) => {
+  if (mode === 'text_to_video') return 0
+  if (mode === 'image_first') return 1
+  if (mode === 'image_first_last') return 2
+  return modelMaxReferenceImages
+}
+
+const normalizeVideoDuration = (requested: number | undefined, options: number[], fallback: number) => {
+  const value = Number.isFinite(requested) ? Number(requested) : fallback
+  return options.includes(value) ? value : fallback
+}
+
+const normalizeVideoResolution = (
+  requested: VolcVideoResolution | undefined,
+  supportedResolutions: VolcVideoResolution[],
+  fallback: VolcVideoResolution
+) => supportedResolutions.includes(requested as VolcVideoResolution) ? requested as VolcVideoResolution : fallback
+
+const normalizeVideoRatio = (requested: VolcVideoRatio | undefined, fallback: VolcVideoRatio) => requested || fallback
+
+const needsSeedance2MultimodalRoles = (mode: VolcVideoMode) => ['multimodal', 'edit', 'extend'].includes(mode)
+
 // 视频生成处理器
 ipcMain.handle('media:generateVideo', async (_event, options: GenerateVideoOptions): Promise<GenerateVideoResult> => {
   const provider = options.provider || runtimeSettings.defaultVideoProvider || 'ark'
@@ -1969,7 +1988,7 @@ ipcMain.handle('media:generateVideo', async (_event, options: GenerateVideoOptio
   }
 
   // 验证模型
-  const modelConfig = VIDEO_GENERATE_MODELS[options.model as keyof typeof VIDEO_GENERATE_MODELS]
+  const modelConfig = getVolcVideoModelConfig(options.model)
   if (!modelConfig) {
     return {
       success: false,
@@ -1997,23 +2016,43 @@ ipcMain.handle('media:generateVideo', async (_event, options: GenerateVideoOptio
 
     const referenceImagePaths = options.referenceImagePaths?.filter(Boolean) || []
     const referenceFrameUrls = await resolveStoryboardFrameUrls(options)
-    const maxReferenceFrames = Math.max(1, modelConfig.maxReferenceFrames || (modelConfig.imageMode === 'first_last_frame' ? 2 : 1))
-    const referenceFrameInputs = pickVideoReferenceFrameInputs(referenceImagePaths, referenceFrameUrls, maxReferenceFrames, options.referenceFrameRoles)
+    const referenceCandidateCount = Math.max(referenceImagePaths.length, referenceFrameUrls.length)
+    const generationMode = inferVideoGenerationMode(options, referenceCandidateCount)
+
+    if (!modelConfig.supportsModes.includes(generationMode)) {
+      throw new Error(`${modelConfig.name} 不支持当前生成模式: ${generationMode}`)
+    }
+
+    const maxReferenceFrames = getMaxFramesForMode(generationMode, modelConfig.maxReferenceImages)
+    const referenceFrameInputs = generationMode === 'text_to_video'
+      ? []
+      : pickVideoReferenceFrameInputs(referenceImagePaths, referenceFrameUrls, maxReferenceFrames, options.referenceFrameRoles)
     const referenceFrames = (await Promise.all(
       referenceFrameInputs.map(input => resolveVideoReferenceFrame(input.localPath, input.remoteUrl, input.role))
     )).filter((frame): frame is VideoReferenceFrame => Boolean(frame))
     const isImageToVideo = referenceFrames.length > 0
 
-    // 构建提示词（按照官方文档格式 + 运镖参数）
-    let fullPrompt = options.prompt
-    const supportedDurations = modelConfig.supportedDurations || [5]
-    const requestedDuration = options.duration || supportedDurations[0]
-    const duration = supportedDurations.includes(requestedDuration) ? requestedDuration : supportedDurations[0]
-    const resolution = options.resolution || '1080p'
-    const cameraFixed = options.cameraFixed !== undefined ? options.cameraFixed : false
-    const watermark = options.watermark !== undefined ? options.watermark : false
+    if (generationMode !== 'text_to_video' && referenceFrames.length === 0) {
+      throw new Error('当前生成模式需要至少一张可用参考图。')
+    }
 
-    // 注入运镖语言（如果用户选择了运镖方式）
+    if (generationMode === 'image_first_last' && referenceFrames.length < 2) {
+      throw new Error('首尾帧模式需要同时选择首帧和尾帧。')
+    }
+
+    // 构建提示词
+    let fullPrompt = options.prompt
+    const requestedDuration = options.duration
+    const duration = normalizeVideoDuration(requestedDuration, modelConfig.durationOptions, modelConfig.defaultDuration)
+    const resolution = normalizeVideoResolution(options.resolution, modelConfig.supportedResolutions, modelConfig.defaultResolution)
+    const ratio = normalizeVideoRatio(options.ratio, modelConfig.defaultRatio)
+    const cameraFixed = modelConfig.supportsCameraFixed && options.cameraFixed !== undefined ? options.cameraFixed : false
+    const watermark = options.watermark !== undefined ? options.watermark : false
+    const generateAudio = modelConfig.supportsAudioGeneration ? options.generateAudio ?? (modelConfig.family === 'seedance2') : false
+    const returnLastFrame = modelConfig.supportsReturnLastFrame ? options.returnLastFrame ?? false : false
+    const serviceTier = modelConfig.supportsFlexTier ? options.serviceTier || 'default' : 'default'
+
+    // 注入运镜语言（如果用户选择了运镜方式）
     if (options.cameraMotion) {
       fullPrompt = `${fullPrompt}, ${options.cameraMotion}`
     }
@@ -2026,212 +2065,89 @@ ipcMain.handle('media:generateVideo', async (_event, options: GenerateVideoOptio
     // 这是防止模型自行添加新角色的关键描述
     if (isImageToVideo) {
       const imgCount = referenceFrames.length
-      const fidelityPrefix = `Strictly use ONLY the character(s) shown in the reference image${imgCount > 1 ? 's' : ''}. ` +
-        `Do NOT add, replace or invent any new characters not present in the reference. ` +
-        `Preserve the exact appearance, gender, face, clothing, and style of the person${imgCount > 1 ? 's' : ''} in the reference image${imgCount > 1 ? 's' : ''}. `
+      const fidelityPrefix = `Use the provided reference image${imgCount > 1 ? 's' : ''} as visual anchor${imgCount > 1 ? 's' : ''}. ` +
+        'Keep the same main subject, outfit, environment, and visual style. ' +
+        'Do not introduce new main characters unless requested. '
       fullPrompt = `${fidelityPrefix}${fullPrompt}`
       console.log('[VideoGen] 图生视频：角色忠实度指令已加入')
     }
 
-    if (requestedDuration !== duration) {
+    if (requestedDuration !== undefined && requestedDuration !== duration) {
       console.warn('[VideoGen] 请求时长不受当前模型支持，已自动回退:', requestedDuration, '=>', duration, '| model:', options.model)
     }
 
     console.log('[VideoGen] 完整提示词:', fullPrompt)
     console.log('[VideoGen] 图生视频模式:', isImageToVideo)
+    console.log('[VideoGen] 生成模式:', generationMode)
+    console.log('[VideoGen] 分辨率 / 比例 / 时长:', resolution, ratio, duration)
 
-    // 构建请求内容
-    const buildVideoRequestData = (frames: VideoReferenceFrame[]) => {
-      const imageItems: VideoContentItem[] = frames.map((frame, index) => {
-        const fallbackRole = index === 0
-          ? 'first_frame'
-          : index === frames.length - 1
-            ? 'last_frame'
-            : 'reference_frame'
-        const explicitRole = frame.role || fallbackRole
-        const role = modelConfig.imageMode === 'first_frame' && index === 0
-          ? 'first_frame'
-          : explicitRole
-        return {
-          type: 'image_url',
-          role,
-          image_url: { url: frame.url }
-        }
-      })
-      const content: VideoContentItem[] = [
-        ...imageItems,
-        { type: 'text', text: fullPrompt }
-      ]
-      return {
-        requestData: {
-          model: options.model,
-          content,
+    const buildReferenceImages = (frames: VideoReferenceFrame[]) => frames.map(frame => ({
+      url: frame.url,
+      role: needsSeedance2MultimodalRoles(generationMode) ? 'reference_image' as VolcImageRole : frame.role
+    }))
+
+    const createTaskForFrames = async (frames: VideoReferenceFrame[], label: string) => {
+      const referenceImages = buildReferenceImages(frames)
+      if (modelConfig.family === 'seedance2') {
+        return createSeedance2VideoTask({
+          apiKey: getEffectiveApiKey(provider),
+          model: modelConfig,
+          mode: generationMode,
+          prompt: fullPrompt,
+          referenceImages,
           duration,
           resolution,
-          watermark
-        },
-        imageCount: imageItems.length
+          ratio,
+          watermark,
+          generateAudio,
+          returnLastFrame,
+          serviceTier: 'default',
+          label
+        })
       }
+
+      return createSeedance1VideoTask({
+        apiKey: getEffectiveApiKey(provider),
+        model: modelConfig,
+        mode: generationMode,
+        prompt: fullPrompt,
+        referenceImages,
+        duration,
+        resolution,
+        ratio,
+        watermark,
+        cameraFixed,
+        generateAudio,
+        returnLastFrame,
+        serviceTier,
+        label
+      })
     }
 
-    let requestBundle = buildVideoRequestData(referenceFrames)
-    if (requestBundle.imageCount) {
-      console.log('[VideoGen] reference frame mode:', modelConfig.imageMode)
-      console.log('[VideoGen] reference frames sent:', requestBundle.imageCount, '/', referenceImagePaths.length || referenceFrameUrls.length)
+    if (referenceFrames.length) {
+      console.log('[VideoGen] reference frames sent:', referenceFrames.length, '/', referenceImagePaths.length || referenceFrameUrls.length)
     }
     if (options.referenceImagePaths?.length && !isImageToVideo) {
       console.warn('[VideoGen] 当前分镜图没有可用远端 URL，无法进入图生视频模式。')
     }
 
-    const requestOptions = {
-      hostname: DOUBAO_BASE_URL,
-      port: 443,
-      path: '/api/v3/contents/generations/tasks',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${getEffectiveApiKey()}`
-      }
-    }
-
-    const createVideoTask = async (payload: any, label: string) => {
-      const postData = JSON.stringify(payload)
-      console.log('[VideoGen] create task payload:', label, '| content items:', payload.content?.length || 0)
-      return new Promise<string>((resolve, reject) => {
-        const req = https.request(requestOptions, (res) => {
-          let data = ''
-          res.on('data', (chunk) => { data += chunk })
-          res.on('end', () => {
-            console.log('[VideoGen] task create response:', data.substring(0, 500))
-
-            if (res.statusCode !== 200) {
-              reject(new Error(`API Error: ${res.statusCode} - ${data.substring(0, 300)}`))
-              return
-            }
-
-            try {
-              const parsed = JSON.parse(data)
-              if (parsed.error) {
-                reject(new Error(parsed.error.message || JSON.stringify(parsed.error)))
-                return
-              }
-
-              if (parsed.id) {
-                resolve(parsed.id)
-              } else {
-                reject(new Error('No task id returned: ' + data.substring(0, 300)))
-              }
-            } catch (e: any) {
-              reject(new Error(`Failed to parse task response: ${e?.message || String(e)}`))
-            }
-          })
-        })
-
-        req.on('error', (error: any) => {
-          reject(new Error(`Network request failed: ${error?.message || String(error)}`))
-        })
-
-        req.setTimeout(30000)
-        req.write(postData)
-        req.end()
-      })
-    }
-
     let taskId: string
     try {
-      taskId = await createVideoTask(requestBundle.requestData, 'all-reference-frames')
+      const createdTask = await createTaskForFrames(referenceFrames, 'all-reference-frames')
+      taskId = createdTask.taskId
     } catch (error) {
       if (referenceFrames.length <= 2) throw error
       const fallbackFrames = [referenceFrames[0], referenceFrames[referenceFrames.length - 1]]
         .filter((frame): frame is VideoReferenceFrame => Boolean(frame))
-      requestBundle = buildVideoRequestData(fallbackFrames)
       console.warn('[VideoGen] Multi-reference request failed; retrying with first/last frames only:', error instanceof Error ? error.message : String(error))
-      taskId = await createVideoTask(requestBundle.requestData, 'first-last-fallback')
+      const createdTask = await createTaskForFrames(fallbackFrames, 'first-last-fallback')
+      taskId = createdTask.taskId
     }
 
     console.log('[VideoGen] 任务已创建, Task ID:', taskId)
 
     // 轮询任务状态
-    const videoUrl = await new Promise<string>((resolve, reject) => {
-      const pollInterval = setInterval(() => {
-        const statusOptions = {
-          hostname: DOUBAO_BASE_URL,
-          port: 443,
-          path: `/api/v3/contents/generations/tasks/${taskId}`,
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${getEffectiveApiKey()}`
-          }
-        }
-
-        const statusReq = https.request(statusOptions, (res) => {
-          let data = ''
-          res.on('data', (chunk) => { data += chunk })
-          res.on('end', () => {
-            try {
-              const parsed = JSON.parse(data)
-              console.log('[VideoGen] 任务状态:', parsed.status || 'unknown')
-
-              if (parsed.status === 'succeeded') {
-                clearInterval(pollInterval)
-                console.log('[VideoGen] 任务成功，完整响应:', JSON.stringify(parsed).substring(0, 1000))
-
-                // 获取视频URL - 支持多种响应格式
-                let videoUrl = ''
-
-                // 方式1: content.video_url（Seedance 视频生成标准格式）
-                if (parsed.content && parsed.content.video_url) {
-                  videoUrl = parsed.content.video_url
-                }
-
-                // 方式2: content.data[0].url（兼容旧格式）
-                if (!videoUrl && parsed.content && parsed.content.data && parsed.content.data.length > 0) {
-                  videoUrl = parsed.content.data[0].url
-                }
-
-                // 方式3: output.video_url
-                if (!videoUrl && parsed.output && parsed.output.video_url) {
-                  videoUrl = parsed.output.video_url
-                }
-
-                // 方式4: output.data[0].url
-                if (!videoUrl && parsed.output && parsed.output.data && parsed.output.data.length > 0) {
-                  videoUrl = parsed.output.data[0].url
-                }
-
-                if (videoUrl) {
-                  resolve(videoUrl)
-                } else {
-                  console.error('[VideoGen] 无法从响应中提取视频URL，响应结构:', Object.keys(parsed))
-                  if (parsed.content) {
-                    console.error('[VideoGen] content 结构:', JSON.stringify(parsed.content).substring(0, 500))
-                  }
-                  reject(new Error('响应中未找到视频URL'))
-                }
-              } else if (parsed.status === 'failed') {
-                clearInterval(pollInterval)
-                reject(new Error(parsed.error?.message || '视频生成失败'))
-              }
-              // 其他状态（pending, running）继续轮询
-            } catch (e) {
-              console.error('[VideoGen] 解析状态失败:', e)
-            }
-          })
-        })
-
-        statusReq.on('error', (error) => {
-          console.error('[VideoGen] 状态查询失败:', error)
-        })
-
-        statusReq.end()
-      }, 3000) // 每3秒轮询一次
-
-      // 5分钟超时
-      setTimeout(() => {
-        clearInterval(pollInterval)
-        reject(new Error('视频生成超时(5分钟)'))
-      }, 300000)
-    })
+    const videoUrl = await pollVolcVideoTask(getEffectiveApiKey(provider), taskId)
 
     console.log('[VideoGen] 视频生成成功, URL:', videoUrl.substring(0, 100) + '...')
 
