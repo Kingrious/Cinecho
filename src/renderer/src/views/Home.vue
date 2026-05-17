@@ -60,6 +60,11 @@ const MODEL_DURATION_OPTIONS: Record<string, number[]> = {
   'doubao-seedance-1-5-pro-251215': [5, 10]
 }
 
+const VIDEO_PROMPT_MODEL_CONFIG: Record<string, { imageMode: 'first_frame' | 'first_last_frame'; maxReferenceFrames: number }> = {
+  'doubao-seedance-1-0-pro-fast-251015': { imageMode: 'first_frame', maxReferenceFrames: 1 },
+  'doubao-seedance-1-5-pro-251215': { imageMode: 'first_last_frame', maxReferenceFrames: 2 }
+}
+
 const selectedModelInfo = computed(() => VIDEO_MODELS.find(m => m.id === selectedModel.value))
 const availableDurations = computed(() => MODEL_DURATION_OPTIONS[selectedModel.value] || [5])
 const modelSupportsFirstLastFrame = computed(() => Boolean(selectedModelInfo.value?.supportsFirstLastFrame))
@@ -84,6 +89,8 @@ const activeFrameSlots = computed<FrameSlot[]>(() => (
 const selectedFrameShots = computed(() => activeFrameSlots.value
   .map(slot => frameShots.value[slot.role])
   .filter(Boolean) as StoryboardShot[])
+const selectedVideoModelConfig = computed(() => VIDEO_PROMPT_MODEL_CONFIG[selectedModel.value] || { imageMode: 'first_frame', maxReferenceFrames: 1 })
+const sentReferenceFrameCount = computed(() => Math.min(selectedFrameShots.value.length, selectedVideoModelConfig.value.maxReferenceFrames))
 const selectedFrameRoles = computed(() => activeFrameSlots.value
   .filter(slot => frameShots.value[slot.role])
   .map(slot => slot.role === 'first'
@@ -351,6 +358,24 @@ const buildStoryboardVideoPrompt = () => {
   ].filter(Boolean).join('\n')
 }
 
+const buildFinalVideoPrompt = (basePrompt: string) => {
+  let fullPrompt = basePrompt
+  if (cameraMotion.value) {
+    fullPrompt = `${fullPrompt}, ${cameraMotion.value}`
+  }
+  if (sentReferenceFrameCount.value > 0) {
+    const imgCount = sentReferenceFrameCount.value
+    const fidelityPrefix = `Strictly use ONLY the character(s) shown in the reference image${imgCount > 1 ? 's' : ''}. ` +
+      `Do NOT add, replace or invent any new characters not present in the reference. ` +
+      `Preserve the exact appearance, gender, face, clothing, and style of the person${imgCount > 1 ? 's' : ''} in the reference image${imgCount > 1 ? 's' : ''}. `
+    fullPrompt = `${fidelityPrefix}${fullPrompt}`
+  }
+  return fullPrompt
+}
+
+const storyboardPromptPreview = computed(() => buildStoryboardVideoPrompt())
+const fullPromptPreview = computed(() => buildFinalVideoPrompt(storyboardPromptPreview.value))
+
 const checkApiKey = async (): Promise<boolean> => {
   try {
     const data = await storeApi.get()
@@ -383,7 +408,7 @@ const handleGenerate = async () => {
   try {
     const frameShots = selectedFrameShots.value
     const options: GenerateVideoOptions = {
-      prompt: buildStoryboardVideoPrompt(),
+      prompt: storyboardPromptPreview.value,
       model: selectedModel.value,
       provider: selectedVideoProvider.value,
       videoName: videoName.value.trim() || undefined,
@@ -666,6 +691,16 @@ watch(selectedModel, () => {
             <div class="flex flex-col gap-2">
               <label class="text-[10px] font-bold text-[var(--text-tertiary)]">文本描述 MOTION SCRIPT</label>
               <textarea v-model="prompt" class="min-h-[132px] w-full bg-[var(--bg-card)] border border-[var(--border-color)] rounded-md p-4 text-xs leading-relaxed text-[var(--text-secondary)] resize-none focus:outline-none focus:border-blue-500/50 shadow-inner font-mono transition-colors" spellcheck="false" placeholder="补充这一段视频的动作、节奏、转场和情绪。分镜图片和每张图提示词会自动一起发送。" />
+            </div>
+
+            <div class="flex flex-col gap-2">
+              <div class="flex items-center justify-between">
+                <label class="text-[10px] font-bold text-[var(--text-tertiary)]">完整提示词预览 FULL PROMPT</label>
+                <span class="text-[10px] text-[var(--text-tertiary)]">{{ fullPromptPreview.length }} chars</span>
+              </div>
+              <div class="max-h-44 overflow-y-auto rounded-md border border-[var(--border-color)] bg-[var(--bg-card)] p-3 text-[11px] leading-relaxed text-[var(--text-secondary)] font-mono whitespace-pre-wrap shadow-inner custom-scrollbar">
+                {{ fullPromptPreview }}
+              </div>
             </div>
           </div>
 

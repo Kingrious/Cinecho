@@ -460,6 +460,18 @@ const optimizeCurrentPrompt = async () => {
 }
 
 // 鈺愨晲鈺愨晲鈺?鎻愮ず璇嶈瀺鍚堟瀯寤?鈺愨晲鈺愨晲鈺?
+type GenerationAssetType = 'role' | 'costume' | 'scene'
+
+const QUALITY_PREFIX = 'masterpiece, best quality, ultra-detailed, photorealistic, sharp focus, professional photography'
+
+const ethnicityDescriptors: Record<string, string> = {
+  east_asian: 'East Asian features, almond-shaped eyes, straight dark hair, fair smooth skin, delicate facial structure',
+  caucasian: 'Caucasian features, defined bone structure, varied eye color, natural skin tone',
+  black: 'Black features, rich deep skin tone, expressive eyes, strong facial structure',
+  hispanic: 'Hispanic features, warm olive skin tone, dark expressive eyes, rich dark hair',
+  south_asian: 'South Asian features, warm brown skin, dark eyes, dark lustrous hair'
+}
+
 const buildFusedPrompt = (type: 'role' | 'costume' | 'scene', basePrompt: string): string => {
   if (type === 'scene') {
     const sceneOpt = sceneTypeOptions.find(o => o.value === sceneType.value)
@@ -474,9 +486,42 @@ const buildFusedPrompt = (type: 'role' | 'costume' | 'scene', basePrompt: string
   return basePrompt
 }
 
+const buildRoleGenerationPrompt = (basePrompt: string): string => {
+  const parts: string[] = [QUALITY_PREFIX]
+  const genderDesc = roleGender.value === 'female' ? 'an adult woman' : roleGender.value === 'male' ? 'an adult man' : 'an adult person'
+  let ageDesc = ''
+  if (ageValue.value) {
+    const safeAge = Math.max(18, ageValue.value)
+    ageDesc = safeAge < 30 ? `${safeAge} years old, young adult,` : safeAge < 50 ? `${safeAge} years old,` : `${safeAge} years old, mature,`
+  }
+  const ethnicDesc = ethnicityDescriptors[roleEthnicity.value] || ''
+  const featureDesc = appearanceFeatures.value.length > 0 ? appearanceFeatures.value.join(', ') : ''
+
+  parts.push(`white background character turnaround sheet, horizontal three-view layout in one image: front view, side view, back view, aligned on the same baseline, equal scale, complete head-to-toe body, fully clothed practical costume, neutral standing pose, no cropped limbs, no text labels, ${genderDesc}, ${ageDesc} ${ethnicDesc}`)
+  parts.push(basePrompt)
+  if (featureDesc) parts.push(featureDesc)
+  parts.push('neutral studio lighting, clean orthographic reference sheet, 8k resolution, RAW photo')
+
+  return parts.filter(Boolean).join(', ')
+}
+
+const buildFinalGenerationPrompt = (type: GenerationAssetType, fusedPrompt: string): string => {
+  if (type === 'role') {
+    return buildRoleGenerationPrompt(fusedPrompt)
+  }
+  if (type === 'costume') {
+    return `${QUALITY_PREFIX}, isolated clothing design sheet on pure white background, complete outfit display, front-facing full garment, no model face, no scene background, ${fusedPrompt}, detailed fabric texture, studio lighting, product photography, high-end fashion photography, 8k resolution`
+  }
+  return `${QUALITY_PREFIX}, white background environment concept sheet, 2x2 grid with four fully colored 3D perspective renders of the same environment: front-left perspective, front-right perspective, rear-left perspective, rear-right perspective, consistent architecture and props across all four views, cinematic lighting, complete color and material rendering in every panel, no flat floor plan, no elevation drawing, no blueprint, no line art, no text labels, ${fusedPrompt}, professional environment design, 8k resolution`
+}
+
+const currentGenerationType = computed(() => tabToPromptType[activeTab.value] as GenerationAssetType)
+const currentFusedPromptPreview = computed(() => buildFusedPrompt(currentGenerationType.value, getPromptValue(currentGenerationType.value)))
+const currentFullPromptPreview = computed(() => buildFinalGenerationPrompt(currentGenerationType.value, currentFusedPromptPreview.value))
+
 // 鈺愨晲鈺愨晲鈺?鍥惧儚鐢熸垚鍔熻兘 鈺愨晲鈺愨晲鈺?
 const handleStartGeneration = async () => {
-  const type = tabToPromptType[activeTab.value] as 'role' | 'costume' | 'scene'
+  const type = currentGenerationType.value
   const basePrompt = getPromptValue(type)
 
   if (!basePrompt.trim()) {
@@ -490,9 +535,11 @@ const handleStartGeneration = async () => {
 
   // 铻嶅悎鐢ㄦ埛閫夋嫨涓庢弿杩?
   const fusedPrompt = buildFusedPrompt(type, basePrompt)
+  const fullPrompt = buildFinalGenerationPrompt(type, fusedPrompt)
 
   console.log('[Assets] 寮€濮嬬敓鎴愬浘鍍? type:', type, 'basePrompt:', basePrompt.substring(0, 50) + '...')
   console.log('[Assets] 铻嶅悎鍚庢彁绀鸿瘝:', fusedPrompt.substring(0, 100) + '...')
+  console.log('[Assets] 完整提示词预览:', fullPrompt.substring(0, 160) + '...')
   isGenerating.value = true
   generatingType.value = type
 
@@ -513,6 +560,7 @@ const handleStartGeneration = async () => {
       prompt: basePrompt,
       corePrompt: basePrompt,
       generationPrompt: fusedPrompt,
+      fullPrompt,
       gender: type === 'role' ? roleGender.value : undefined,
       age: type === 'role' ? ageValue.value : undefined,
       features: type === 'role' ? [...appearanceFeatures.value] : undefined,
@@ -565,6 +613,7 @@ const handleStartGeneration = async () => {
           prompt: basePrompt,
           corePrompt: basePrompt,
           generationPrompt: fusedPrompt,
+          fullPrompt,
           gender: type === 'role' ? roleGender.value : undefined,
           age: type === 'role' ? ageValue.value : undefined,
           features: type === 'role' ? [...appearanceFeatures.value] : undefined,
@@ -961,6 +1010,16 @@ watch(activeTab, () => {
               ></textarea>
             </div>
           </div>
+
+          <div class="flex flex-col gap-2">
+            <div class="flex items-center justify-between">
+              <label class="text-[10px] font-bold text-[var(--text-tertiary)]">完整提示词预览 FULL PROMPT</label>
+              <span class="text-[10px] text-[var(--text-tertiary)]">{{ currentFullPromptPreview.length }} chars</span>
+            </div>
+            <div class="max-h-44 overflow-y-auto rounded-md border border-[var(--border-color)] bg-[var(--bg-card)] p-3 text-[11px] leading-relaxed text-[var(--text-secondary)] font-mono whitespace-pre-wrap shadow-inner custom-scrollbar">
+              {{ currentFullPromptPreview }}
+            </div>
+          </div>
         </div>
 
         <!-- 鏈嶉グ闈㈡澘 -->
@@ -1013,6 +1072,16 @@ watch(activeTab, () => {
               ></textarea>
             </div>
           </div>
+
+          <div class="flex flex-col gap-2">
+            <div class="flex items-center justify-between">
+              <label class="text-[10px] font-bold text-[var(--text-tertiary)]">完整提示词预览 FULL PROMPT</label>
+              <span class="text-[10px] text-[var(--text-tertiary)]">{{ currentFullPromptPreview.length }} chars</span>
+            </div>
+            <div class="max-h-44 overflow-y-auto rounded-md border border-[var(--border-color)] bg-[var(--bg-card)] p-3 text-[11px] leading-relaxed text-[var(--text-secondary)] font-mono whitespace-pre-wrap shadow-inner custom-scrollbar">
+              {{ currentFullPromptPreview }}
+            </div>
+          </div>
         </div>
 
         <!-- 鍦烘櫙闈㈡澘 -->
@@ -1063,6 +1132,16 @@ watch(activeTab, () => {
                 class="absolute inset-0 w-full h-full bg-[var(--bg-card)] border border-[var(--border-color)] rounded-md p-4 text-xs leading-relaxed text-[var(--text-secondary)] resize-none focus:outline-none focus:border-blue-500/50 shadow-inner font-mono transition-colors" 
                 spellcheck="false"
               ></textarea>
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-2">
+            <div class="flex items-center justify-between">
+              <label class="text-[10px] font-bold text-[var(--text-tertiary)]">完整提示词预览 FULL PROMPT</label>
+              <span class="text-[10px] text-[var(--text-tertiary)]">{{ currentFullPromptPreview.length }} chars</span>
+            </div>
+            <div class="max-h-44 overflow-y-auto rounded-md border border-[var(--border-color)] bg-[var(--bg-card)] p-3 text-[11px] leading-relaxed text-[var(--text-secondary)] font-mono whitespace-pre-wrap shadow-inner custom-scrollbar">
+              {{ currentFullPromptPreview }}
             </div>
           </div>
         </div>
