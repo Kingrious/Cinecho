@@ -4,7 +4,7 @@ import { configApi, dialogApi, storeApi, systemApi } from '../api/media'
 import { useDialog } from '../composables/useDialog'
 import { VIDEO_MODELS } from '../types/media'
 
-type ProviderId = 'ark' | 'google' | 'bailian' | 'openrouter' | 'minimax' | 'vidu' | 'fal'
+type ProviderId = 'ark' | 'apimart' | 'google' | 'bailian' | 'openrouter' | 'minimax' | 'vidu' | 'fal'
 
 const PROVIDERS: Array<{
   id: ProviderId
@@ -15,6 +15,7 @@ const PROVIDERS: Array<{
   models: { text?: string[]; image?: string[]; video?: string[] }
 }> = [
   { id: 'ark', name: 'VolcEngine Ark', text: true, image: true, video: true, models: { text: ['doubao-seed-2-0-lite-260215'], image: ['doubao-seedream-5-0-260128'], video: VIDEO_MODELS.map(model => model.id) } },
+  { id: 'apimart', name: 'APIMart', text: false, image: true, video: false, models: { image: ['gpt-image-2', 'gemini-3-pro-image-preview', 'gemini-3-pro-image-preview-official'] } },
   { id: 'google', name: 'Google AI Studio', text: true, image: true, video: true, models: { text: ['gemini-3-pro-preview'], image: ['gemini-3-pro-image-preview'], video: ['veo-3.1-generate-preview'] } },
   { id: 'bailian', name: 'Alibaba Bailian', text: true, image: false, video: true, models: { text: ['qwen-plus'], video: ['wan2.5-i2v-preview'] } },
   { id: 'openrouter', name: 'OpenRouter', text: true, image: false, video: false, models: { text: ['openai/gpt-5.1'] } },
@@ -37,10 +38,10 @@ const isValidating = ref(false)
 const validationResult = ref<{ valid: boolean; error?: string } | null>(null)
 
 const defaultTextProvider = ref<ProviderId>('ark')
-const defaultImageProvider = ref<ProviderId>('ark')
+const defaultImageProvider = ref<ProviderId>('apimart')
 const defaultVideoProvider = ref<ProviderId>('ark')
 const defaultTextModel = ref('doubao-seed-2-0-lite-260215')
-const defaultImageModel = ref('doubao-seedream-5-0-260128')
+const defaultImageModel = ref('gpt-image-2')
 const defaultVideoModel = ref('doubao-seedance-1-0-pro-fast-251015')
 const videoMaxParallel = ref(3)
 
@@ -84,10 +85,10 @@ const loadSettings = async () => {
     apiKeys.value = { ...(settings.apiKeys || {}) }
     if (settings.apiKey && !apiKeys.value.ark) apiKeys.value.ark = settings.apiKey
     defaultTextProvider.value = settings.defaultTextProvider || 'ark'
-    defaultImageProvider.value = settings.defaultImageProvider || 'ark'
+    defaultImageProvider.value = settings.defaultImageProvider || 'apimart'
     defaultVideoProvider.value = settings.defaultVideoProvider || 'ark'
     defaultTextModel.value = settings.defaultTextModel || 'doubao-seed-2-0-lite-260215'
-    defaultImageModel.value = settings.defaultImageModel || 'doubao-seedream-5-0-260128'
+    defaultImageModel.value = settings.defaultImageModel || 'gpt-image-2'
     defaultVideoModel.value = settings.defaultVideoModel || 'doubao-seedance-1-0-pro-fast-251015'
     videoMaxParallel.value = normalizeVideoMaxParallel(settings.videoMaxParallel ?? 3)
     currentTheme.value = settings.theme || 'light'

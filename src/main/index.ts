@@ -31,14 +31,20 @@ const ASSET_SUBDIRS = {
 // 默认输出目录（用户文档目录下的Cinecho/Assets）
 let outputDir = join(app.getPath('documents'), 'Cinecho', 'Assets')
 
+const APIMART_PROVIDER = 'apimart'
+const APIMART_BASE_URL = 'api.apimart.ai'
+const APIMART_API_KEY = 'REDACTED_API_KEY'
+const APIMART_IMAGE_MODELS = ['gpt-image-2', 'gemini-3-pro-image-preview', 'gemini-3-pro-image-preview-official']
+const getApimartBearerKey = (apiKey: string) => apiKey.startsWith('apimart:') ? apiKey.slice('apimart:'.length) : apiKey
+
 const DEFAULT_SETTINGS = {
   outputDir,
-  apiKeys: {} as Record<string, string>,
+  apiKeys: { [APIMART_PROVIDER]: APIMART_API_KEY } as Record<string, string>,
   defaultTextProvider: 'ark',
-  defaultImageProvider: 'ark',
+  defaultImageProvider: APIMART_PROVIDER,
   defaultVideoProvider: 'ark',
   defaultTextModel: 'doubao-seed-2-0-lite-260215',
-  defaultImageModel: 'doubao-seedream-5-0-260128',
+  defaultImageModel: 'gpt-image-2',
   defaultVideoModel: 'doubao-seedance-1-0-pro-fast-251015',
   videoMaxParallel: 3,
   theme: 'light'
@@ -182,6 +188,7 @@ ipcMain.handle('api:validateKey', async (_event, payload: string | { provider: s
 const validateProviderKey = async (provider: string, apiKey: string): Promise<{ valid: boolean; error?: string }> => {
   if (!apiKey?.trim()) return { valid: false, error: 'API Key 未配置' }
   const probes: Record<string, { url: string; init: RequestInit }> = {
+    apimart: { url: 'https://api.apimart.ai/v1/tasks/apimart-key-probe', init: { headers: { Authorization: `Bearer ${getApimartBearerKey(apiKey)}` } } },
     google: { url: 'https://generativelanguage.googleapis.com/v1beta/models', init: { headers: { 'x-goog-api-key': apiKey } } },
     bailian: { url: 'https://dashscope.aliyuncs.com/compatible-mode/v1/models', init: { headers: { Authorization: `Bearer ${apiKey}` } } },
     openrouter: { url: 'https://openrouter.ai/api/v1/credits', init: { headers: { Authorization: `Bearer ${apiKey}` } } },
@@ -201,6 +208,7 @@ const validateProviderKey = async (provider: string, apiKey: string): Promise<{ 
     const res = await fetch(probe.url, probe.init)
     if (res.ok) return { valid: true }
     const text = await res.text()
+    if (provider === APIMART_PROVIDER && res.status !== 401 && res.status !== 403) return { valid: true }
     return { valid: false, error: `HTTP ${res.status}: ${text.substring(0, 160)}` }
   } catch (error: any) {
     return { valid: false, error: error?.message || String(error) }
@@ -620,7 +628,7 @@ ipcMain.handle('window:close', (event) => {
 let userApiKey = '' // 用户配置的 API Key
 
 const normalizeSettings = (settings: any = {}) => {
-  const apiKeys = { ...(settings.apiKeys || {}) }
+  const apiKeys = { ...DEFAULT_SETTINGS.apiKeys, ...(settings.apiKeys || {}) }
   if (settings.apiKey && !apiKeys.ark) apiKeys.ark = settings.apiKey
   const parsedVideoMaxParallel = Number(settings.videoMaxParallel ?? DEFAULT_SETTINGS.videoMaxParallel)
   const videoMaxParallel = Number.isFinite(parsedVideoMaxParallel)
@@ -659,6 +667,7 @@ const updateStoreSettings = async (settings: any) => {
 const getEffectiveApiKey = (provider = 'ark'): string => {
   const key = runtimeSettings?.apiKeys?.[provider]
   if (key) return key
+  if (provider === APIMART_PROVIDER) return APIMART_API_KEY
   return provider === 'ark' ? userApiKey : ''
 }
 
@@ -967,9 +976,134 @@ const downloadImage = (url: string, outputPath: string): Promise<{ filePath: str
   })
 }
 
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+const fetchJsonWithTimeout = async (url: string, init: RequestInit = {}, timeoutMs = 120000) => {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal })
+    const text = await response.text()
+    let json: any = null
+    try {
+      json = text ? JSON.parse(text) : null
+    } catch {
+      json = null
+    }
+    return { response, text, json }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+const getApimartResolution = (model: string) => model === 'gpt-image-2' ? '2k' : '2K'
+
+const extractApimartImageUrls = (task: any): string[] => {
+  const images = task?.result?.images
+  if (!Array.isArray(images)) return []
+  return images.flatMap((image: any) => {
+    const value = image?.url || image?.b64_json || image
+    if (Array.isArray(value)) return value.filter(Boolean)
+    return value ? [value] : []
+  })
+}
+
+const generateApimartImageToFile = async (
+  fullPrompt: string,
+  localFilePath: string,
+  fileName: string,
+  referenceImagePaths: string[] = [],
+  model = runtimeSettings.defaultImageModel || 'gpt-image-2'
+): Promise<GenerateImageResult> => {
+  if (!APIMART_IMAGE_MODELS.includes(model)) {
+    model = 'gpt-image-2'
+  }
+
+  let referenceImages: string[] = []
+  try {
+    referenceImages = await getReferenceImageDataUrls(referenceImagePaths)
+  } catch (error: any) {
+    return { success: false, error: `参考图上传/读取失败：${error?.message || String(error)}` }
+  }
+
+  const apiKey = getApimartBearerKey(getEffectiveApiKey(APIMART_PROVIDER))
+  const requestBody = {
+    model,
+    prompt: fullPrompt,
+    n: 1,
+    size: '16:9',
+    resolution: getApimartResolution(model),
+    ...(referenceImages.length > 0 ? { image_urls: referenceImages.slice(0, model.startsWith('gemini') ? 14 : 16) } : {}),
+    ...(model !== 'gemini-3-pro-image-preview-official' ? { official_fallback: false } : {})
+  }
+
+  try {
+    console.log('[APIMart ImageGen] Submit:', JSON.stringify({ model, hasRefs: referenceImages.length > 0 }))
+    const submit = await fetchJsonWithTimeout(`https://${APIMART_BASE_URL}/v1/images/generations`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(requestBody)
+    }, 120000)
+
+    if (!submit.response.ok) {
+      return { success: false, error: `APIMart submit error: HTTP ${submit.response.status} - ${submit.text.substring(0, 300)}` }
+    }
+
+    const taskId = submit.json?.data?.[0]?.task_id
+    if (!taskId) {
+      return { success: false, error: `APIMart 返回中未找到 task_id: ${submit.text.substring(0, 300)}` }
+    }
+
+    await delay(15000)
+    const startedAt = Date.now()
+    while (Date.now() - startedAt < 150000) {
+      const taskResult = await fetchJsonWithTimeout(`https://${APIMART_BASE_URL}/v1/tasks/${encodeURIComponent(taskId)}`, {
+        headers: {
+          'Authorization': `Bearer ${apiKey}`
+        }
+      }, 30000)
+
+      if (!taskResult.response.ok) {
+        return { success: false, error: `APIMart task error: HTTP ${taskResult.response.status} - ${taskResult.text.substring(0, 300)}` }
+      }
+
+      const task = taskResult.json?.data
+      if (task?.status === 'completed') {
+        const imageUrl = extractApimartImageUrls(task)[0]
+        if (!imageUrl) {
+          return { success: false, error: `APIMart 任务完成但未找到图片 URL: ${taskResult.text.substring(0, 300)}` }
+        }
+
+        if (imageUrl.startsWith('data:')) {
+          const base64Data = imageUrl.replace(/^data:image\/\w+;base64,/, '')
+          const buffer = Buffer.from(base64Data, 'base64')
+          await writeFile(localFilePath, buffer)
+          return { success: true, imageUrl: pathToFileURL(localFilePath).href, filePath: localFilePath, fileName, fileSize: buffer.length }
+        }
+
+        const downloadResult = await downloadImage(imageUrl, localFilePath)
+        return { success: true, imageUrl, filePath: downloadResult.filePath, fileName, fileSize: downloadResult.fileSize }
+      }
+
+      if (task?.status === 'failed') {
+        return { success: false, error: task?.error?.message || 'APIMart image generation failed' }
+      }
+
+      await delay(4000)
+    }
+
+    return { success: false, error: `APIMart 图像生成超时，task_id=${taskId}` }
+  } catch (error: any) {
+    return { success: false, error: `APIMart 请求失败: ${error?.message || String(error)}` }
+  }
+}
+
 ipcMain.handle('media:generateImage', async (_event, options: GenerateImageOptions): Promise<GenerateImageResult> => {
   const provider = options.provider || runtimeSettings.defaultImageProvider || 'ark'
-  if (provider !== 'ark') {
+  if (provider !== 'ark' && provider !== APIMART_PROVIDER) {
     return { success: false, error: `${provider} image generation is configured but not available in this local adapter yet. Use Ark for image generation.` }
   }
   // 检查 API Key 是否已配置
@@ -1046,6 +1180,26 @@ ipcMain.handle('media:generateImage', async (_event, options: GenerateImageOptio
 
     console.log('[ImageGen] Full prompt:', fullPrompt.substring(0, 200))
     console.log('[ImageGen] Output path:', localFilePath)
+
+    if (provider === APIMART_PROVIDER) {
+      const result = await generateApimartImageToFile(
+        fullPrompt,
+        localFilePath,
+        fileName,
+        options.referenceImagePaths || [],
+        options.model || runtimeSettings.defaultImageModel || 'gpt-image-2'
+      )
+      if (result.success && result.filePath) {
+        const sourceImageUrl = result.imageUrl
+        try {
+          await writeGeneratedImageMetadata(result.filePath, fileName, options, fullPrompt, negativePrompt, sourceImageUrl)
+        } catch (metadataError) {
+          console.warn('[ImageGen] Failed to write asset metadata:', metadataError)
+        }
+        result.imageUrl = assetUrlWithVersion(result.filePath, (filePath) => pathToFileURL(filePath).href)
+      }
+      return result
+    }
 
     // 调用豆包图像生成API（完全按照官方文档格式）
     const postData = JSON.stringify({
@@ -1423,6 +1577,22 @@ const generateArkImageToFile = async (
   negativePrompt = NEGATIVE_PROMPT_SCENE,
   referenceImagePaths: string[] = []
 ): Promise<GenerateImageResult> => {
+  const provider = runtimeSettings.defaultImageProvider || 'ark'
+  if (provider === APIMART_PROVIDER) {
+    return generateApimartImageToFile(
+      fullPrompt,
+      localFilePath,
+      fileName,
+      referenceImagePaths,
+      runtimeSettings.defaultImageModel || 'gpt-image-2'
+    )
+  }
+  if (provider !== 'ark') {
+    return { success: false, error: `${provider} image generation is configured but not available in this local adapter yet.` }
+  }
+  const keyCheck = checkApiKeyConfigured('ark')
+  if (!keyCheck.configured) return { success: false, error: keyCheck.error }
+
   let referenceImages: string[] = []
   try {
     referenceImages = await getReferenceImageDataUrls(referenceImagePaths)
@@ -2614,7 +2784,8 @@ const sendBridgeJson = (res: http.ServerResponse, statusCode: number, data: any,
 }
 
 const createImageFromBridgeOptions = async (options: GenerateImageOptions): Promise<GenerateImageResult> => {
-  const keyCheck = checkApiKeyConfigured('ark')
+  const provider = options.provider || runtimeSettings.defaultImageProvider || 'ark'
+  const keyCheck = checkApiKeyConfigured(provider)
   if (!keyCheck.configured) return { success: false, error: keyCheck.error }
   const subdir = options.type === 'costume' ? ASSET_SUBDIRS.costumes : options.type === 'scene' ? ASSET_SUBDIRS.scenes : ASSET_SUBDIRS.roles
   const targetDir = join(outputDir, subdir)
