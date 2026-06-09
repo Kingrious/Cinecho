@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { mediaApi, dialogApi, eventsApi, aiApi, storeApi } from '../api/media'
 import { useDialog } from '../composables/useDialog'
 import type { MediaAsset, AssetType } from '../types/media'
+import { formatCommonError, formatImageGenerationError, formatPromptOptimizationError } from '../utils/errorMessages'
 
 const dialog = useDialog()
 const ASSET_LIBRARY_CHANGED_EVENT = 'cinecho:asset-library-changed'
@@ -163,14 +164,6 @@ const getAssetImageClass = (_asset: MediaAsset) => {
   return 'w-full h-full object-contain bg-white/95 opacity-95 transition-transform duration-500 group-hover:scale-[1.02] group-hover:opacity-100'
 }
 
-const formatGenerationError = (error?: string) => {
-  const message = error || '未知错误'
-  if (message.includes('OutputImageSensitiveContentDetected')) {
-    return '平台判定生成结果可能包含敏感内容。已将角色生成改为成人、全身、完整服装的三视图提示词，请重试；如果仍失败，请减少真人写真、暴露服装或过度性感化描述。'
-  }
-  return message
-}
-
 // 鈺愨晲鈺愨晲鈺?Methods 鈺愨晲鈺愨晲鈺?
 const loadAssets = async () => {
   isLoading.value = true
@@ -264,7 +257,7 @@ const handleDeleteAsset = async (asset: MediaAsset) => {
       }
     } catch (error: any) {
       console.error('Delete asset failed:', error)
-      await dialog.error(`删除失败：${error?.message || '未知错误'}\n\n请检查文件是否存在或是否有权限删除。`)
+      await dialog.error(`删除失败：${formatCommonError(error?.message, '无法删除文件。')}\n\n请检查文件是否存在或是否有权限删除。`)
     }
   }
 }
@@ -453,7 +446,7 @@ const optimizeCurrentPrompt = async () => {
     promptStates.value[type].userInput = optimized
   } catch (error: any) {
     console.error('Prompt optimization failed:', error)
-    await dialog.error(`提示词优化失败：${error?.message || '请检查 API Key 是否有效'}`)
+    await dialog.error(formatPromptOptimizationError(error?.message))
   } finally {
     isOptimizing.value = false
   }
@@ -628,18 +621,35 @@ const handleStartGeneration = async () => {
       notifyAssetLibraryChanged()
     } else {
       console.error('[Assets] 鍥惧儚鐢熸垚澶辫触:', result.error)
-      await dialog.error(`生成失败：${formatGenerationError(result.error)}`)
+      await dialog.error(formatImageGenerationError(result.error))
     }
   } catch (error: any) {
     console.error('[Assets] Image generation failed:', error)
-    await dialog.error(`图像生成失败：${formatGenerationError(error?.message)}`)
+    await dialog.error(formatImageGenerationError(error?.message))
   } finally {
     isGenerating.value = false
     generatingType.value = null
   }
 }
 
-// 鈺愨晲鈺愨晲鈺?Lifecycle 鈺愨晲鈺愨晲鈺?
+const handleCancelGeneration = async () => {
+  if (!isGenerating.value) return
+  try {
+    const result = await mediaApi.cancelImageGeneration()
+    isGenerating.value = false
+    generatingType.value = null
+    assets.value = assets.value.filter(a => a.status !== 'generating')
+    if (result.error) {
+      await dialog.notify(result.error, '已取消')
+    }
+  } catch (error: any) {
+    console.error('[Assets] Cancel image generation failed:', error)
+    isGenerating.value = false
+    generatingType.value = null
+    assets.value = assets.value.filter(a => a.status !== 'generating')
+  }
+}
+
 let unsubscribeProgress: (() => void) | null = null
 
 onMounted(async () => {
@@ -1158,7 +1168,7 @@ watch(activeTab, () => {
                 <svg v-if="isGenerating" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
                 <span>{{ isGenerating ? '生成中...' : '现在开始生成' }}</span>
               </button>
-              <button class="w-[88px] shrink-0 bg-transparent border border-[var(--border-color)] text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] font-medium text-sm py-3 rounded-lg transition-colors active:scale-[0.98]">取消</button>
+              <button class="w-[88px] shrink-0 bg-transparent border border-[var(--border-color)] text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] font-medium text-sm py-3 rounded-lg transition-colors active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed" :disabled="!isGenerating" @click="handleCancelGeneration">取消</button>
             </div>
           </div>
         </div>

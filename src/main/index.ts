@@ -10,7 +10,17 @@ import ffmpeg from 'fluent-ffmpeg'
 import { createSeedance1VideoTask } from './volcengine/seedance1'
 import { createSeedance2VideoTask } from './volcengine/seedance2'
 import { getVolcVideoModelConfig, type VolcImageRole, type VolcServiceTier, type VolcVideoMode, type VolcVideoRatio, type VolcVideoResolution } from './volcengine/videoModels'
-import { pollVolcVideoTask } from './volcengine/client'
+import { cancelVolcVideoTask, pollVolcVideoTask } from './volcengine/client'
+
+// 修复 EPIPE 错误：当终端管道断开时（如从某些 IDE 启动），防止 console.log 导致崩溃
+process.stdout.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EPIPE') return
+  throw err
+})
+process.stderr.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EPIPE') return
+  throw err
+})
 
 // 存储配置路径
 const STORE_PATH = join(app.getPath('userData'), 'storage.json')
@@ -51,6 +61,12 @@ const DEFAULT_SETTINGS = {
 }
 
 let runtimeSettings: any = { ...DEFAULT_SETTINGS }
+
+const sendTaskProgress = (data: { id: string; status: string; progress: number; message?: string; taskType?: string }) => {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send('sync:taskProgress', data)
+  }
+}
 
 function createWindow() {
   const mainWindow = new BrowserWindow({
@@ -371,7 +387,7 @@ type ImageAssetType = 'role' | 'costume' | 'scene'
 
 type AssetGenerationMetadata = {
   version?: number
-  type?: ImageAssetType | 'storyboard'
+  type?: ImageAssetType | 'storyboard' | 'video'
   name?: string
   prompt?: string
   corePrompt?: string
@@ -391,6 +407,15 @@ type AssetGenerationMetadata = {
   sourceImageUrl?: string
   generatedAt?: number
   updatedAt?: number
+  // Video-specific
+  generationMode?: string
+  duration?: number
+  resolution?: string
+  ratio?: string
+  generateAudio?: boolean
+  referenceImageCount?: number
+  storyboardId?: string
+  storyboardName?: string
 }
 
 const appendUrlVersion = (url: string, version?: number | string) => {
@@ -398,6 +423,30 @@ const appendUrlVersion = (url: string, version?: number | string) => {
   const normalized = Number(version)
   const value = Number.isFinite(normalized) ? Math.floor(normalized) : Date.now()
   return `${url}${url.includes('?') ? '&' : '?'}v=${encodeURIComponent(String(value))}`
+}
+
+const normalizeUserFacingAiError = (raw?: string) => {
+  const message = String(raw || '').trim()
+  const lowerMessage = message.toLowerCase()
+
+  if (
+    message.includes('InputImageSensitiveContentDetected.PrivacyInformation') ||
+    lowerMessage.includes('may contain real person') ||
+    lowerMessage.includes('privacyinformation') ||
+    lowerMessage.includes('real person')
+  ) {
+    return 'AI 生成服务限制：当前参考图疑似包含真人照片或隐私信息，模型服务方不允许继续生成。这不是 Cinecho 平台故障。请改用 AI 角色图、三视图设定图，或先将真人照片处理成非真人风格后再试。'
+  }
+
+  if (message.includes('InputTextSensitiveContentDetected') || lowerMessage.includes('sensitive text') || lowerMessage.includes('may contain sensitive')) {
+    return 'AI 生成服务限制：当前提示词被模型服务方判定包含敏感内容，因此拒绝生成。这不是 Cinecho 平台故障。请修改提示词，避免涉及暴力、色情、政治敏感等违规描述后重试。'
+  }
+
+  if (message.includes('OutputImageSensitiveContentDetected')) {
+    return 'AI 生成服务限制：当前生成内容被模型服务方判定可能包含敏感内容，因此拒绝生成。这不是 Cinecho 平台故障。请调整提示词后重试。'
+  }
+
+  return message
 }
 
 const getAssetMetadataPath = (filePath: string) => `${filePath}.json`
@@ -487,6 +536,42 @@ const writeGeneratedImageMetadata = async (
     imagePath: filePath,
     fileName,
     sourceImageUrl,
+    generatedAt: now,
+    updatedAt: now
+  }
+  await writeAssetMetadata(filePath, metadata)
+}
+
+const writeGeneratedVideoMetadata = async (
+  filePath: string,
+  fileName: string,
+  options: GenerateVideoOptions,
+  fullPrompt: string,
+  sourceVideoUrl?: string,
+  referenceCount?: number
+) => {
+  const now = Date.now()
+  const metadata: AssetGenerationMetadata = {
+    version: 1,
+    type: 'video',
+    name: options.videoName || basename(fileName, extname(fileName)),
+    prompt: options.prompt,
+    corePrompt: options.prompt,
+    generationPrompt: options.prompt,
+    fullPrompt,
+    provider: options.provider || runtimeSettings.defaultVideoProvider || 'ark',
+    model: options.model,
+    generationMode: options.generationMode || 'text_to_video',
+    duration: options.duration,
+    resolution: options.resolution,
+    ratio: options.ratio,
+    generateAudio: options.generateAudio,
+    referenceImageCount: referenceCount || 0,
+    storyboardId: options.storyboardId,
+    storyboardName: options.storyboardName,
+    imagePath: filePath,
+    fileName,
+    sourceImageUrl: sourceVideoUrl,
     generatedAt: now,
     updatedAt: now
   }
@@ -978,9 +1063,11 @@ const downloadImage = (url: string, outputPath: string): Promise<{ filePath: str
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
-const fetchJsonWithTimeout = async (url: string, init: RequestInit = {}, timeoutMs = 120000) => {
+const fetchJsonWithTimeout = async (url: string, init: RequestInit = {}, timeoutMs = 120000, externalSignal?: AbortSignal) => {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  const onExternalAbort = () => controller.abort()
+  externalSignal?.addEventListener('abort', onExternalAbort, { once: true })
   try {
     const response = await fetch(url, { ...init, signal: controller.signal })
     const text = await response.text()
@@ -993,6 +1080,7 @@ const fetchJsonWithTimeout = async (url: string, init: RequestInit = {}, timeout
     return { response, text, json }
   } finally {
     clearTimeout(timeout)
+    externalSignal?.removeEventListener('abort', onExternalAbort)
   }
 }
 
@@ -1013,7 +1101,8 @@ const generateApimartImageToFile = async (
   localFilePath: string,
   fileName: string,
   referenceImagePaths: string[] = [],
-  model = runtimeSettings.defaultImageModel || 'gpt-image-2'
+  model = runtimeSettings.defaultImageModel || 'gpt-image-2',
+  signal?: AbortSignal
 ): Promise<GenerateImageResult> => {
   if (!APIMART_IMAGE_MODELS.includes(model)) {
     model = 'gpt-image-2'
@@ -1046,7 +1135,7 @@ const generateApimartImageToFile = async (
         'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify(requestBody)
-    }, 120000)
+    }, 120000, signal)
 
     if (!submit.response.ok) {
       return { success: false, error: `APIMart submit error: HTTP ${submit.response.status} - ${submit.text.substring(0, 300)}` }
@@ -1064,7 +1153,7 @@ const generateApimartImageToFile = async (
         headers: {
           'Authorization': `Bearer ${apiKey}`
         }
-      }, 30000)
+      }, 30000, signal)
 
       if (!taskResult.response.ok) {
         return { success: false, error: `APIMart task error: HTTP ${taskResult.response.status} - ${taskResult.text.substring(0, 300)}` }
@@ -1097,6 +1186,9 @@ const generateApimartImageToFile = async (
 
     return { success: false, error: `APIMart 图像生成超时，task_id=${taskId}` }
   } catch (error: any) {
+    if (error?.name === 'AbortError' || signal?.aborted) {
+      return { success: false, error: '图像生成已被用户取消。' }
+    }
     return { success: false, error: `APIMart 请求失败: ${error?.message || String(error)}` }
   }
 }
@@ -1115,6 +1207,10 @@ ipcMain.handle('media:generateImage', async (_event, options: GenerateImageOptio
       error: keyCheck.error
     }
   }
+
+  // 创建 AbortController 用于支持取消
+  const controller = new AbortController()
+  activeImageGenController = controller
 
   console.log('========================================')
   console.log('[ImageGen] ========== 开始图像生成 ==========')
@@ -1187,7 +1283,8 @@ ipcMain.handle('media:generateImage', async (_event, options: GenerateImageOptio
         localFilePath,
         fileName,
         options.referenceImagePaths || [],
-        options.model || runtimeSettings.defaultImageModel || 'gpt-image-2'
+        options.model || runtimeSettings.defaultImageModel || 'gpt-image-2',
+        controller.signal
       )
       if (result.success && result.filePath) {
         const sourceImageUrl = result.imageUrl
@@ -1197,6 +1294,9 @@ ipcMain.handle('media:generateImage', async (_event, options: GenerateImageOptio
           console.warn('[ImageGen] Failed to write asset metadata:', metadataError)
         }
         result.imageUrl = assetUrlWithVersion(result.filePath, (filePath) => pathToFileURL(filePath).href)
+      }
+      if (!result.success) {
+        result.error = normalizeUserFacingAiError(result.error)
       }
       return result
     }
@@ -1349,8 +1449,17 @@ ipcMain.handle('media:generateImage', async (_event, options: GenerateImageOptio
         })
       })
 
+      controller.signal.addEventListener('abort', () => req.destroy(), { once: true })
+
       req.on('error', (error: any) => {
         console.error('[ImageGen] Request failed:', error)
+        if (error?.name === 'AbortError' || error?.code === 'ABORT_ERR' || controller.signal.aborted) {
+          resolve({
+            success: false,
+            error: '图像生成已被用户取消。'
+          })
+          return
+        }
         resolve({
           success: false,
           error: `网络请求失败: ${error?.message || error?.code || String(error)}`
@@ -1388,15 +1497,24 @@ ipcMain.handle('media:generateImage', async (_event, options: GenerateImageOptio
       result.imageUrl = assetUrlWithVersion(result.filePath, (filePath) => pathToFileURL(filePath).href)
     }
 
+    if (!result.success) {
+      result.error = normalizeUserFacingAiError(result.error)
+    }
     return result
   } catch (error: any) {
     console.error('[ImageGen] ========== 生成失败(外层catch) ==========')
     console.error('[ImageGen] 错误:', error?.message || String(error))
     console.error('[ImageGen] =======================================')
-    // 安全地构造错误信息，避免返回不可序列化的对象
+    if (error?.name === 'AbortError' || controller.signal.aborted) {
+      return { success: false, error: '图像生成已被用户取消。' }
+    }
     return {
       success: false,
-      error: error?.message || (typeof error === 'string' ? error : '图像生成失败')
+      error: normalizeUserFacingAiError(error?.message || (typeof error === 'string' ? error : '图像生成失败'))
+    }
+  } finally {
+    if (activeImageGenController === controller) {
+      activeImageGenController = null
     }
   }
 })
@@ -2051,21 +2169,29 @@ const scanGeneratedVideoAssets = async (
         const fileStat = await stat(fullPath)
         const name = basename(entry.name, ext)
         const url = assetUrlFor(fullPath)
+        const metadata = await readAssetMetadata(fullPath)
+        const prompt = metadata?.corePrompt || metadata?.prompt || metadata?.generationPrompt
 
         videos.push({
           id: Buffer.from(fullPath).toString('base64'),
-          name,
+          name: metadata?.name || name,
           path: fullPath,
           url,
           type: 'video',
           thumbnail: url,
           size: fileStat.size,
-          duration: 0,
+          duration: metadata?.duration || 0,
           width: undefined,
           height: undefined,
           createdAt: fileStat.birthtimeMs,
           modifiedAt: fileStat.mtimeMs,
-          status: 'ready'
+          status: 'ready',
+          prompt,
+          model: metadata?.model,
+          generationMode: metadata?.generationMode,
+          resolution: metadata?.resolution,
+          ratio: metadata?.ratio,
+          generateAudio: metadata?.generateAudio
         })
       } catch (err) {
         console.error(`Failed to stat video ${fullPath}:`, err)
@@ -2085,6 +2211,15 @@ ipcMain.handle('media:scanVideos', async (_event, dirPath?: string) => {
 
 let activeVideoGenerationCount = 0
 const pendingVideoGenerationResolvers: Array<() => void> = []
+let activeVideoGenerationSession: {
+  progressId: string
+  provider: string
+  taskId?: string
+  lastStatus?: string
+  abortController: AbortController
+} | null = null
+
+let activeImageGenController: AbortController | null = null
 
 const getVideoMaxParallel = () => {
   const value = Number(runtimeSettings.videoMaxParallel ?? DEFAULT_SETTINGS.videoMaxParallel)
@@ -2143,14 +2278,23 @@ const needsSeedance2MultimodalRoles = (mode: VolcVideoMode) => ['multimodal', 'e
 
 // 视频生成处理器
 ipcMain.handle('media:generateVideo', async (_event, options: GenerateVideoOptions): Promise<GenerateVideoResult> => {
+  const progressId = `video:${Date.now()}`
+  const abortController = new AbortController()
   const provider = options.provider || runtimeSettings.defaultVideoProvider || 'ark'
+  activeVideoGenerationSession = {
+    progressId,
+    provider,
+    abortController
+  }
   if (provider !== 'ark') {
+    activeVideoGenerationSession = null
     return { success: false, error: `${provider} video generation is configured but not available in this local adapter yet. Use Ark for video generation.` }
   }
   // 检查 API Key 是否已配置
   const keyCheck = checkApiKeyConfigured(provider)
   if (!keyCheck.configured) {
     console.error('[VideoGen] API Key 未配置')
+    activeVideoGenerationSession = null
     return {
       success: false,
       error: keyCheck.error
@@ -2160,6 +2304,7 @@ ipcMain.handle('media:generateVideo', async (_event, options: GenerateVideoOptio
   // 验证模型
   const modelConfig = getVolcVideoModelConfig(options.model)
   if (!modelConfig) {
+    activeVideoGenerationSession = null
     return {
       success: false,
       error: `不支持的视频模型: ${options.model}`
@@ -2171,6 +2316,7 @@ ipcMain.handle('media:generateVideo', async (_event, options: GenerateVideoOptio
   console.log('[VideoGen] 模型:', options.model)
   console.log('[VideoGen] 视频名称:', options.videoName || '(未设置，使用默认)')
   console.log('[VideoGen] 提示词:', options.prompt?.substring(0, 100) + '...')
+  sendTaskProgress({ id: progressId, taskType: 'video', status: 'submitting', progress: 5, message: '正在提交视频生成任务' })
 
   const releaseVideoGenerationSlot = await acquireVideoGenerationSlot()
   console.log('[VideoGen] 并行槽位:', `${activeVideoGenerationCount}/${getVideoMaxParallel()}`)
@@ -2315,11 +2461,44 @@ ipcMain.handle('media:generateVideo', async (_event, options: GenerateVideoOptio
     }
 
     console.log('[VideoGen] 任务已创建, Task ID:', taskId)
+    if (activeVideoGenerationSession?.progressId === progressId) {
+      activeVideoGenerationSession.taskId = taskId
+    }
+    sendTaskProgress({ id: progressId, taskType: 'video', status: 'submitted', progress: 15, message: '任务已提交，正在等待服务端处理' })
 
     // 轮询任务状态
-    const videoUrl = await pollVolcVideoTask(getEffectiveApiKey(provider), taskId)
+    const videoUrl = await pollVolcVideoTask(
+      getEffectiveApiKey(provider),
+      taskId,
+      300000,
+      (progress) => {
+        if (activeVideoGenerationSession?.progressId === progressId) {
+          activeVideoGenerationSession.lastStatus = progress.status
+        }
+        const normalizedStatus = progress.status || 'running'
+        const progressValue =
+          normalizedStatus === 'queued'
+            ? 25
+            : normalizedStatus === 'running'
+              ? 60
+              : normalizedStatus === 'succeeded'
+                ? 85
+                : normalizedStatus === 'failed' || normalizedStatus === 'expired' || normalizedStatus === 'cancelled'
+                  ? 100
+                  : 40
+        sendTaskProgress({
+          id: progressId,
+          taskType: 'video',
+          status: normalizedStatus,
+          progress: progressValue,
+          message: progress.message
+        })
+      },
+      abortController.signal
+    )
 
     console.log('[VideoGen] 视频生成成功, URL:', videoUrl.substring(0, 100) + '...')
+    sendTaskProgress({ id: progressId, taskType: 'video', status: 'downloading', progress: 92, message: '视频已生成，正在下载到本地' })
 
     // 下载视频到本地（使用用户自定义文件名）
     const timestamp = Date.now()
@@ -2358,6 +2537,16 @@ ipcMain.handle('media:generateVideo', async (_event, options: GenerateVideoOptio
       const downloadResult = await downloadImage(videoUrl, localFilePath)
       console.log('[VideoGen] 视频下载成功')
 
+      try {
+        const actualFileName = basename(downloadResult.filePath)
+        await writeGeneratedVideoMetadata(downloadResult.filePath, actualFileName, options, fullPrompt, videoUrl, referenceFrames.length)
+        console.log('[VideoGen] 视频 metadata 写入成功')
+      } catch (metadataError) {
+        console.warn('[VideoGen] Failed to write video metadata:', metadataError)
+      }
+
+      sendTaskProgress({ id: progressId, taskType: 'video', status: 'completed', progress: 100, message: '视频生成完成' })
+
       return {
         success: true,
         videoUrl: videoUrl,
@@ -2368,6 +2557,7 @@ ipcMain.handle('media:generateVideo', async (_event, options: GenerateVideoOptio
       }
     } catch (downloadError: any) {
       console.error('[VideoGen] 视频下载失败:', downloadError)
+      sendTaskProgress({ id: progressId, taskType: 'video', status: 'completed', progress: 100, message: '视频已生成，但下载本地失败' })
       // 即使下载失败，也返回URL
       return {
         success: true,
@@ -2380,13 +2570,67 @@ ipcMain.handle('media:generateVideo', async (_event, options: GenerateVideoOptio
   } catch (error: any) {
     console.error('[VideoGen] ========== 生成失败 ===========')
     console.error('[VideoGen] 错误:', error?.message || String(error))
+    sendTaskProgress({ id: progressId, taskType: 'video', status: 'failed', progress: 100, message: error?.message || '视频生成失败' })
     return {
       success: false,
       error: error?.message || (typeof error === 'string' ? error : '视频生成失败')
     }
   } finally {
+    if (activeVideoGenerationSession?.progressId === progressId) {
+      activeVideoGenerationSession = null
+    }
     releaseVideoGenerationSlot()
   }
+})
+
+ipcMain.handle('media:cancelVideoGeneration', async (): Promise<{ success: boolean; canceled?: boolean; error?: string }> => {
+  const session = activeVideoGenerationSession
+  if (!session) {
+    return { success: false, error: '当前没有正在生成的视频任务。' }
+  }
+
+  const status = session.lastStatus || 'submitting'
+  session.abortController.abort()
+
+  if (session.taskId && status === 'queued') {
+    try {
+      await cancelVolcVideoTask(getEffectiveApiKey(session.provider), session.taskId)
+      sendTaskProgress({
+        id: session.progressId,
+        taskType: 'video',
+        status: 'cancelled',
+        progress: 100,
+        message: '已取消视频生成任务'
+      })
+      return { success: true, canceled: true }
+    } catch (error: any) {
+      return { success: false, error: error?.message || '取消视频任务失败' }
+    }
+  }
+
+  sendTaskProgress({
+    id: session.progressId,
+    taskType: 'video',
+    status: 'cancelled',
+    progress: 100,
+    message: status === 'running'
+      ? '已停止本地等待，服务端任务可能仍在运行'
+      : '已停止等待当前视频生成任务'
+  })
+
+  if (status === 'running') {
+    return { success: true, canceled: true, error: '当前任务已经开始执行，平台不支持中途取消；已为你停止本地等待。' }
+  }
+
+  return { success: true, canceled: true }
+})
+
+ipcMain.handle('media:cancelImageGeneration', async (): Promise<{ success: boolean; canceled?: boolean; error?: string }> => {
+  if (!activeImageGenController) {
+    return { success: false, error: '当前没有正在生成的图片任务。' }
+  }
+  activeImageGenController.abort()
+  return { success: true, canceled: true }
 })
 
 // ─── STITCH 拼接模块 (ffmpeg) ───
@@ -2949,6 +3193,12 @@ const startDevBridgeServer = () => {
           return
         case '/media/generateVideo':
           sendBridgeJson(res, 200, { success: false, error: '普通浏览器开发页暂不支持视频生成，请在 Electron 应用中操作。' }, origin)
+          return
+        case '/media/cancelVideoGeneration':
+          sendBridgeJson(res, 200, { success: false, error: '普通浏览器开发页暂不支持停止视频生成，请在 Electron 应用中操作。' }, origin)
+          return
+        case '/media/cancelImageGeneration':
+          sendBridgeJson(res, 200, { success: false, error: '普通浏览器开发页暂不支持停止图片生成，请在 Electron 应用中操作。' }, origin)
           return
         case '/api/validateKey':
           sendBridgeJson(res, 200, await validateProviderKey(body.payload?.provider || 'ark', body.payload?.apiKey || body.payload || ''), origin)

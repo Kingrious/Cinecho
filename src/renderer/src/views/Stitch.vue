@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick, onDeactivated }
 import { mediaApi, stitchApi, eventsApi } from '../api/media'
 import { useDialog } from '../composables/useDialog'
 import type { VideoMeta, StitchClip } from '../types/media'
+import { formatExportError } from '../utils/errorMessages'
 
 const dialog = useDialog()
 
@@ -465,10 +466,10 @@ const handleExport = async () => {
       // User canceled the save dialog, do nothing
       showExportSuccess.value = false
     } else {
-      await dialog.error(`导出失败: ${result.error || '未知错误'}`)
+      await dialog.error(formatExportError(result.error))
     }
   } catch (e: any) {
-    await dialog.error(`导出失败: ${e?.message || e}`)
+    await dialog.error(formatExportError(e?.message || e))
   } finally {
     isExporting.value = false
     exportProgress.value = 100

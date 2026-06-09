@@ -45,6 +45,10 @@ export interface VideoAsset {
   progress?: number
   prompt?: string
   model?: string
+  generationMode?: VideoGenerationMode
+  resolution?: VideoResolution
+  ratio?: VideoRatio
+  generateAudio?: boolean
 }
 
 export interface GenerateVideoOptions {

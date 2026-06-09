@@ -18,7 +18,7 @@ export type CreateSeedance2VideoTaskOptions = {
   watermark: boolean
   generateAudio: boolean
   returnLastFrame: boolean
-  serviceTier: VolcServiceTier
+  serviceTier?: VolcServiceTier
   label: string
 }
 
@@ -35,7 +35,7 @@ export const buildSeedance2VideoPayload = (options: Omit<CreateSeedance2VideoTas
     image_url: { url: image.url }
   }))
 
-  return {
+  const payload: any = {
     model: options.model.id,
     content: [
       ...imageItems,
@@ -46,9 +46,14 @@ export const buildSeedance2VideoPayload = (options: Omit<CreateSeedance2VideoTas
     ratio: options.ratio,
     generate_audio: options.generateAudio,
     watermark: options.watermark,
-    return_last_frame: options.returnLastFrame,
-    service_tier: options.serviceTier
+    return_last_frame: options.returnLastFrame
   }
+
+  if (options.model.supportsFlexTier && options.serviceTier) {
+    payload.service_tier = options.serviceTier
+  }
+
+  return payload
 }
 
 export const createSeedance2VideoTask = async (options: CreateSeedance2VideoTaskOptions) => {

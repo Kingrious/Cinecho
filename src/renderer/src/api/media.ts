@@ -63,6 +63,8 @@ export interface ElectronAPI {
     generateImage: (options: GenerateImageOptions) => Promise<GenerateImageResult>
     scanVideos: (path?: string) => Promise<VideoAsset[]>
     generateVideo: (options: GenerateVideoOptions) => Promise<GenerateVideoResult>
+    cancelVideoGeneration: () => Promise<{ success: boolean; canceled?: boolean; error?: string }>
+    cancelImageGeneration: () => Promise<{ success: boolean; canceled?: boolean; error?: string }>
   }
   api: {
     validateKey: (payload: string | { provider: string; apiKey: string }) => Promise<{ valid: boolean; error?: string }>
@@ -75,7 +77,7 @@ export interface ElectronAPI {
     generateShot: (options: GenerateStoryboardShotOptions) => Promise<StoryboardAsset>
     delete: (storyboardId: string) => Promise<boolean>
   }
-  onTaskProgress: (callback: (data: { id: string; status: string; progress: number }) => void) => () => void
+  onTaskProgress: (callback: (data: { id: string; status: string; progress: number; message?: string; taskType?: string }) => void) => () => void
   onScanProgress: (callback: (data: ScanProgress) => void) => () => void
   ai: {
     optimizePrompt: (prompt: string) => Promise<string>
@@ -159,7 +161,9 @@ const bridgeApi: ElectronAPI = {
     setOutputDirectory: (path) => bridgeRequest<boolean>('/media/setOutputDirectory', { path }),
     generateImage: (options) => bridgeRequest<GenerateImageResult>('/media/generateImage', options),
     scanVideos: (path) => bridgeRequest<VideoAsset[]>('/media/scanVideos', { path }),
-    generateVideo: (options) => bridgeRequest<GenerateVideoResult>('/media/generateVideo', options)
+    generateVideo: (options) => bridgeRequest<GenerateVideoResult>('/media/generateVideo', options),
+    cancelVideoGeneration: () => bridgeRequest<{ success: boolean; canceled?: boolean; error?: string }>('/media/cancelVideoGeneration', {}),
+    cancelImageGeneration: () => bridgeRequest<{ success: boolean; canceled?: boolean; error?: string }>('/media/cancelImageGeneration', {})
   },
   api: {
     validateKey: (payload) => bridgeRequest<{ valid: boolean; error?: string }>('/api/validateKey', { payload })
@@ -225,11 +229,13 @@ export const mediaApi = {
   setOutputDirectory: (path: string): Promise<boolean> => getApi().media.setOutputDirectory(path),
   generateImage: (options: GenerateImageOptions): Promise<GenerateImageResult> => getApi().media.generateImage(options),
   scanVideos: (path?: string): Promise<VideoAsset[]> => getApi().media.scanVideos(path),
-  generateVideo: (options: GenerateVideoOptions): Promise<GenerateVideoResult> => getApi().media.generateVideo(options)
+  generateVideo: (options: GenerateVideoOptions): Promise<GenerateVideoResult> => getApi().media.generateVideo(options),
+  cancelVideoGeneration: (): Promise<{ success: boolean; canceled?: boolean; error?: string }> => getApi().media.cancelVideoGeneration(),
+  cancelImageGeneration: (): Promise<{ success: boolean; canceled?: boolean; error?: string }> => getApi().media.cancelImageGeneration()
 }
 
 export const eventsApi = {
-  onTaskProgress: (callback: (data: { id: string; status: string; progress: number }) => void) => getApi().onTaskProgress(callback),
+  onTaskProgress: (callback: (data: { id: string; status: string; progress: number; message?: string; taskType?: string }) => void) => getApi().onTaskProgress(callback),
   onScanProgress: (callback: (data: ScanProgress) => void) => getApi().onScanProgress(callback),
   onStitchProgress: (callback: (data: { percent: number; currentTime: number }) => void) => getApi().onStitchProgress(callback)
 }

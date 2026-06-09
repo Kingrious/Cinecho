@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onActivated, onMounted, ref, watch } from 'vue'
-import { mediaApi, storeApi, storyboardApi } from '../api/media'
+import { computed, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
+import { eventsApi, mediaApi, storeApi, storyboardApi } from '../api/media'
 import { useDialog } from '../composables/useDialog'
 import type { GenerateVideoOptions, StoryboardAsset, StoryboardShot, VideoAsset, VideoGenerationMode, VideoRatio, VideoResolution } from '../types/media'
 import { VIDEO_MODELS } from '../types/media'
+import { formatVideoGenerationError } from '../utils/errorMessages'
 
 const dialog = useDialog()
 
@@ -11,9 +12,13 @@ const videos = ref<VideoAsset[]>([])
 const storyboards = ref<StoryboardAsset[]>([])
 const isLoading = ref(false)
 const isGenerating = ref(false)
+const generationProgress = ref(0)
+const generationStatusText = ref('正在准备视频生成任务')
+const generationElapsedSeconds = ref(0)
 const outputDir = ref('')
 const selectedVideo = ref<VideoAsset | null>(null)
 const videoThumbnailCache = ref<Record<string, string>>({})
+const expandedPromptShotIndex = ref(-1)
 
 const prompt = ref('')
 const videoName = ref('')
@@ -46,6 +51,8 @@ const frameShots = ref<Record<FrameRole, StoryboardShot | null>>({
 const draggedShotIndex = ref<number | null>(null)
 const dragOverFrameRole = ref<FrameRole | null>(null)
 let hasActivatedOnce = false
+let unsubscribeTaskProgress: (() => void) | null = null
+let generationTimer: number | null = null
 
 const CAMERA_MOTION_OPTIONS = [
   { value: 'slow push in, zoom in gradually', label: '推 Push In' },
@@ -264,6 +271,47 @@ const formatFileSize = (bytes: number): string => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
 }
 
+const formatGenerationElapsed = computed(() => {
+  const totalSeconds = generationElapsedSeconds.value
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return minutes > 0 ? `${minutes}分${seconds}秒` : `${seconds}秒`
+})
+
+const startGenerationTimer = () => {
+  if (generationTimer !== null) window.clearInterval(generationTimer)
+  generationElapsedSeconds.value = 0
+  generationTimer = window.setInterval(() => {
+    generationElapsedSeconds.value += 1
+  }, 1000)
+}
+
+const stopGenerationTimer = () => {
+  if (generationTimer !== null) {
+    window.clearInterval(generationTimer)
+    generationTimer = null
+  }
+}
+
+const handleCancelGeneration = async () => {
+  if (!isGenerating.value) return
+
+  try {
+    const result = await mediaApi.cancelVideoGeneration()
+    isGenerating.value = false
+    stopGenerationTimer()
+    generationProgress.value = 100
+    generationStatusText.value = result.error || '已停止等待当前视频生成任务'
+
+    if (result.error) {
+      await dialog.notify(result.error, '已停止')
+    }
+  } catch (error: any) {
+    console.error('[Creation] Cancel video generation failed:', error)
+    await dialog.error(formatVideoGenerationError(error?.message))
+  }
+}
+
 const loadVideos = async () => {
   isLoading.value = true
   try {
@@ -454,6 +502,9 @@ const handleGenerate = async () => {
   if (!hasApiKey) return
 
   isGenerating.value = true
+  generationProgress.value = 2
+  generationStatusText.value = '正在提交视频生成任务'
+  startGenerationTimer()
   try {
     const frameShots = selectedFrameShots.value
     const options: GenerateVideoOptions = {
@@ -482,15 +533,31 @@ const handleGenerate = async () => {
       await dialog.notify('视频生成成功！')
       await loadVideos()
       prompt.value = ''
+    } else if ((result.error || '').includes('已停止等待当前视频生成任务')) {
+      // User intentionally stopped waiting; no error dialog needed.
     } else {
-      await dialog.error(`生成失败: ${result.error || '未知错误'}`)
+      await dialog.error(formatVideoGenerationError(result.error))
     }
   } catch (error: any) {
     console.error('[Creation] Video generation failed:', error)
-    await dialog.error(`视频生成失败: ${error?.message || '请重试'}`)
+    if ((error?.message || '').includes('已停止等待当前视频生成任务')) {
+      return
+    }
+    await dialog.error(formatVideoGenerationError(error?.message))
   } finally {
     isGenerating.value = false
+    stopGenerationTimer()
   }
+}
+
+const loadVideoParams = (video: VideoAsset) => {
+  if (video.prompt) prompt.value = video.prompt
+  if (video.model) selectedModel.value = video.model
+  if (video.generationMode) generationMode.value = video.generationMode
+  if (video.duration) duration.value = video.duration
+  if (video.resolution) resolution.value = video.resolution
+  if (video.ratio) ratio.value = video.ratio
+  if (video.generateAudio !== undefined) generateAudio.value = video.generateAudio
 }
 
 const deleteVideo = async (video: VideoAsset) => {
@@ -514,7 +581,19 @@ const closeVideoPlayer = () => {
   selectedVideo.value = null
 }
 
-onMounted(loadVideos)
+onMounted(async () => {
+  await loadVideos()
+  unsubscribeTaskProgress = eventsApi.onTaskProgress((data) => {
+    if (data.taskType !== 'video') return
+    generationProgress.value = typeof data.progress === 'number' ? data.progress : generationProgress.value
+    generationStatusText.value = data.message || generationStatusText.value
+  })
+})
+
+onUnmounted(() => {
+  stopGenerationTimer()
+  if (unsubscribeTaskProgress) unsubscribeTaskProgress()
+})
 
 onActivated(() => {
   if (hasActivatedOnce) {
@@ -597,7 +676,8 @@ watch(generationMode, () => {
                 <div class="w-10 h-10 rounded-full border-2 border-blue-500/20 border-t-blue-400 animate-spin"></div>
                 <div class="text-center">
                   <p class="text-xs font-bold tracking-wider text-[var(--text-primary)]">视频生成中</p>
-                  <p class="mt-1 text-[10px] text-[var(--text-tertiary)]">生成完成后会自动显示在这里</p>
+                  <p class="mt-1 text-[10px] text-[var(--text-tertiary)]">{{ generationStatusText }}</p>
+                  <p class="mt-1 text-[10px] text-blue-300/80">已等待 {{ formatGenerationElapsed }} · {{ generationProgress }}%</p>
                 </div>
               </div>
             </div>
@@ -624,6 +704,14 @@ watch(generationMode, () => {
                 <p class="text-[9px] text-white font-bold bg-black/70 backdrop-blur rounded px-2 py-1 truncate shadow text-right">{{ video.name }}</p>
               </div>
               <div class="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-all translate-y-1 group-hover:translate-y-0">
+                <button
+                  v-if="video.prompt"
+                  @click.stop="loadVideoParams(video)"
+                  class="w-6 h-6 rounded bg-black/70 backdrop-blur flex items-center justify-center hover:bg-amber-500/80 transition-colors"
+                  title="使用此参数重新生成"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+                </button>
                 <button @click.stop="playVideo(video)" class="w-6 h-6 rounded bg-black/70 backdrop-blur flex items-center justify-center hover:bg-blue-500/80 transition-colors" title="播放视频">
                   <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="white" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                 </button>
@@ -753,7 +841,7 @@ watch(generationMode, () => {
                   v-for="shot in readyShots"
                   :key="shot.index"
                   :class="[
-                    'group overflow-hidden rounded-md border bg-[var(--bg-card)] text-left transition-all hover:border-blue-400/70 hover:bg-[var(--bg-tertiary)]',
+                    'group/shot rounded-md border bg-[var(--bg-card)] text-left transition-all hover:border-blue-400/70 hover:bg-[var(--bg-tertiary)] relative',
                     selectedFrameShots.some(item => item.index === shot.index) ? 'border-blue-400/80 opacity-70' : 'border-[var(--border-color)]'
                   ]"
                   type="button"
@@ -763,8 +851,33 @@ watch(generationMode, () => {
                   @dragstart="event => handleShotDragStart(shot, event)"
                   @dragend="handleShotDragEnd"
                 >
-                  <div class="aspect-video bg-black/20">
-                    <img :src="shot.thumbnail || shot.imageUrl" class="h-full w-full object-cover transition-transform group-hover:scale-[1.04]" />
+                  <div class="aspect-video bg-black/20 rounded-t-md overflow-hidden">
+                    <img :src="shot.thumbnail || shot.imageUrl" class="h-full w-full object-cover transition-transform group-hover/shot:scale-[1.04]" />
+                    <button
+                      v-if="shot.prompt"
+                      class="shot-prompt-badge"
+                      type="button"
+                      :title="expandedPromptShotIndex === shot.index ? '点击收起' : '点击查看提示词'"
+                      @click.stop="expandedPromptShotIndex = expandedPromptShotIndex === shot.index ? -1 : shot.index"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                      <span>词</span>
+                    </button>
+                  </div>
+                  <div
+                    v-if="expandedPromptShotIndex === shot.index"
+                    class="shot-prompt-tooltip"
+                    @click.stop
+                  >
+                    <div class="flex items-center justify-between gap-1 mb-1">
+                      <span class="text-[8px] font-bold text-blue-300">#{{ shot.index }} 提示词</span>
+                      <button
+                        class="text-[var(--text-tertiary)] hover:text-white text-[10px] leading-none"
+                        type="button"
+                        @click.stop="expandedPromptShotIndex = -1"
+                      >✕</button>
+                    </div>
+                    <p class="text-[11px] leading-relaxed text-[var(--text-primary)] whitespace-pre-wrap">{{ shot.prompt }}</p>
                   </div>
                   <div class="bg-black/40 px-1.5 py-1 text-center text-[9px] font-bold text-white">
                     #{{ shot.index }}
@@ -886,10 +999,19 @@ watch(generationMode, () => {
 
         <div class="absolute bottom-0 left-0 right-0 p-5 bg-gradient-to-t from-[var(--bg-secondary)] via-[var(--bg-secondary)] to-transparent pointer-events-none">
           <div class="p-1 border-2 border-dashed border-[#2b3a5e] rounded-xl pointer-events-auto bg-[var(--bg-secondary)]/80 backdrop-blur">
-            <button @click="handleGenerate" :disabled="isGenerating || !canGenerate" class="w-full bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_20px_rgba(37,99,235,0.4)] font-bold text-sm py-3 rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
-              <svg v-if="isGenerating" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
-              <span>{{ isGenerating ? '生成中...' : '生成分镜视频' }}</span>
-            </button>
+            <div class="flex gap-2">
+              <button @click="handleGenerate" :disabled="isGenerating || !canGenerate" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_20px_rgba(37,99,235,0.4)] font-bold text-sm py-3 rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                <svg v-if="isGenerating" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+                <span>{{ isGenerating ? '生成中...' : '生成分镜视频' }}</span>
+              </button>
+              <button
+                v-if="isGenerating"
+                @click="handleCancelGeneration"
+                class="w-[110px] shrink-0 rounded-lg border border-red-400/40 bg-red-500/10 px-3 py-3 text-sm font-bold text-red-200 transition-colors hover:bg-red-500/20"
+              >
+                停止生成
+              </button>
+            </div>
           </div>
         </div>
       </aside>
@@ -953,5 +1075,51 @@ watch(generationMode, () => {
 }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: var(--text-tertiary);
+}
+
+.shot-prompt-badge {
+  position: absolute;
+  top: 0.2rem;
+  left: 0.2rem;
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.2rem;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(96, 165, 250, 0.3);
+  color: rgba(147, 197, 253, 0.85);
+  font-size: 0.5rem;
+  font-weight: 700;
+  opacity: 0;
+  transition: opacity 0.12s;
+  z-index: 5;
+}
+
+.group\/shot:hover .shot-prompt-badge {
+  opacity: 1;
+}
+
+.shot-prompt-badge:hover {
+  background: rgba(30, 58, 138, 0.85);
+  border-color: rgba(96, 165, 250, 0.7);
+}
+
+.shot-prompt-tooltip {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  margin-bottom: 0.2rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 0.3rem;
+  background: rgba(15, 23, 42, 0.97);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(96, 165, 250, 0.4);
+  box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.5);
+  z-index: 50;
+  max-height: 16rem;
+  overflow-y: auto;
 }
 </style>

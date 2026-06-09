@@ -14,6 +14,7 @@ import {
 import { mediaApi, storyboardApi, storeApi } from '../api/media'
 import { useDialog } from '../composables/useDialog'
 import type { MediaAsset, StoryboardAsset, StoryboardShot } from '../types/media'
+import { formatImageGenerationError, formatStoryboardError } from '../utils/errorMessages'
 
 type ShotRow = StoryboardShot & {
   clientId: string
@@ -120,7 +121,7 @@ const loadStoryboards = async () => {
     applyStoryboard(preferred || null)
   } catch (error: any) {
     console.error('[Storyboard] load failed:', error)
-    await dialog.error(`加载分镜失败：${error?.message || '未知错误'}`)
+    await dialog.error(formatStoryboardError(error?.message, '加载'))
   } finally {
     isLoading.value = false
   }
@@ -177,7 +178,7 @@ const saveStoryboardNow = async () => {
   } catch (error: any) {
     console.error('[Storyboard] save failed:', error)
     saveState.value = 'error'
-    await dialog.error(`保存分镜失败：${error?.message || '未知错误'}`)
+    await dialog.error(formatStoryboardError(error?.message, '保存'))
   } finally {
     isSaving.value = false
   }
@@ -207,7 +208,7 @@ const handleDeleteStoryboard = async () => {
     applyStoryboard(storyboards.value[0] || null)
   } catch (error: any) {
     console.error('[Storyboard] delete failed:', error)
-    await dialog.error(`删除分镜失败：${error?.message || '未知错误'}`)
+    await dialog.error(formatStoryboardError(error?.message, '删除'))
   } finally {
     isLoading.value = false
   }
@@ -222,7 +223,7 @@ const handleCreateStoryboard = async () => {
     applyStoryboard(created)
   } catch (error: any) {
     console.error('[Storyboard] create failed:', error)
-    await dialog.error(`创建分镜失败：${error?.message || '未知错误'}`)
+    await dialog.error(formatStoryboardError(error?.message, '创建'))
   } finally {
     isLoading.value = false
   }
@@ -376,7 +377,7 @@ const handleGenerateShot = async (shot: ShotRow) => {
     await refreshCurrentStoryboard(updated)
   } catch (error: any) {
     console.error('[Storyboard] generate shot failed:', error)
-    await dialog.error(`生成画面失败：${error?.message || '未知错误'}`)
+    await dialog.error(formatImageGenerationError(error?.message))
     await refreshCurrentStoryboard()
   } finally {
     generatingShotIndex.value = null

@@ -32,7 +32,9 @@ const api = {
     generateImage: (options: any) => ipcRenderer.invoke('media:generateImage', options),
     // 视频相关
     scanVideos: (path: string) => ipcRenderer.invoke('media:scanVideos', path),
-    generateVideo: (options: any) => ipcRenderer.invoke('media:generateVideo', options)
+    generateVideo: (options: any) => ipcRenderer.invoke('media:generateVideo', options),
+    cancelVideoGeneration: () => ipcRenderer.invoke('media:cancelVideoGeneration'),
+    cancelImageGeneration: () => ipcRenderer.invoke('media:cancelImageGeneration')
   },
 
   storyboard: {
