@@ -11,6 +11,7 @@ import { createSeedance1VideoTask } from './volcengine/seedance1'
 import { createSeedance2VideoTask } from './volcengine/seedance2'
 import { getVolcVideoModelConfig, type VolcImageRole, type VolcServiceTier, type VolcVideoMode, type VolcVideoRatio, type VolcVideoResolution } from './volcengine/videoModels'
 import { cancelVolcVideoTask, pollVolcVideoTask } from './volcengine/client'
+import { flushLogs, initializeLogging, logEvent } from './logging'
 
 // 修复 EPIPE 错误：当终端管道断开时（如从某些 IDE 启动），防止 console.log 导致崩溃
 process.stdout.on('error', (err: NodeJS.ErrnoException) => {
@@ -57,6 +58,12 @@ const DEFAULT_SETTINGS = {
   defaultImageModel: 'gpt-image-2',
   defaultVideoModel: 'doubao-seedance-1-0-pro-fast-251015',
   videoMaxParallel: 3,
+  logUpload: {
+    enabled: true,
+    url: 'https://cinecho.art/api/logs/upload',
+    token: '',
+    batchSize: 100
+  },
   theme: 'light'
 }
 
@@ -67,6 +74,33 @@ const sendTaskProgress = (data: { id: string; status: string; progress: number; 
     window.webContents.send('sync:taskProgress', data)
   }
 }
+
+const fileNameOnly = (filePath?: string) => filePath ? basename(filePath) : undefined
+
+const summarizeImageGenerationOptions = (options: any = {}) => ({
+  type: options.type,
+  provider: options.provider || runtimeSettings.defaultImageProvider || 'ark',
+  model: options.model || runtimeSettings.defaultImageModel,
+  hasName: Boolean(options.name),
+  prompt: options.prompt,
+  promptLength: String(options.prompt || '').length,
+  referenceImageCount: Array.isArray(options.referenceImagePaths) ? options.referenceImagePaths.length : 0
+})
+
+const summarizeVideoGenerationOptions = (options: any = {}) => ({
+  provider: options.provider || runtimeSettings.defaultVideoProvider || 'ark',
+  model: options.model,
+  hasVideoName: Boolean(options.videoName),
+  prompt: options.prompt,
+  promptLength: String(options.prompt || '').length,
+  duration: options.duration,
+  resolution: options.resolution,
+  ratio: options.ratio,
+  generationMode: options.generationMode,
+  referenceImageCount: Array.isArray(options.referenceImagePaths) ? options.referenceImagePaths.length : 0,
+  storyboardId: options.storyboardId,
+  storyboardName: options.storyboardName
+})
 
 function createWindow() {
   const mainWindow = new BrowserWindow({
@@ -137,7 +171,6 @@ ipcMain.handle('store:updateSetting', async (_event, settings) => {
     // 原子化写入
     await writeFile(STORE_PATH + '.tmp', JSON.stringify(data, null, 2))
     await rename(STORE_PATH + '.tmp', STORE_PATH)
-    
     return true
   } catch (error) {
     console.error('Failed to update settings:', error)
@@ -704,7 +737,7 @@ ipcMain.handle('window:isMaximized', (event) => {
   return !!win?.isMaximized()
 })
 
-ipcMain.handle('window:close', (event) => {
+ipcMain.handle('window:close', async (event) => {
   const win = BrowserWindow.fromWebContents(event.sender)
   if (win) win.close()
 })
@@ -719,12 +752,18 @@ const normalizeSettings = (settings: any = {}) => {
   const videoMaxParallel = Number.isFinite(parsedVideoMaxParallel)
     ? Math.min(10, Math.max(1, Math.round(parsedVideoMaxParallel)))
     : DEFAULT_SETTINGS.videoMaxParallel
+  const logUpload = {
+    ...DEFAULT_SETTINGS.logUpload,
+    ...(settings.logUpload || {}),
+    url: settings.logUpload?.url?.trim() || DEFAULT_SETTINGS.logUpload.url
+  }
   return {
     ...DEFAULT_SETTINGS,
     ...settings,
     apiKeys,
     outputDir: settings.outputDir || outputDir,
-    videoMaxParallel
+    videoMaxParallel,
+    logUpload
   }
 }
 
@@ -1195,13 +1234,22 @@ const generateApimartImageToFile = async (
 
 ipcMain.handle('media:generateImage', async (_event, options: GenerateImageOptions): Promise<GenerateImageResult> => {
   const provider = options.provider || runtimeSettings.defaultImageProvider || 'ark'
+  await logEvent('media.generateImage.start', summarizeImageGenerationOptions(options))
   if (provider !== 'ark' && provider !== APIMART_PROVIDER) {
+    await logEvent('media.generateImage.fail', {
+      ...summarizeImageGenerationOptions(options),
+      error: `${provider} image generation is not available`
+    })
     return { success: false, error: `${provider} image generation is configured but not available in this local adapter yet. Use Ark for image generation.` }
   }
   // 检查 API Key 是否已配置
   const keyCheck = checkApiKeyConfigured(provider)
   if (!keyCheck.configured) {
     console.error('[ImageGen] API Key 未配置')
+    await logEvent('media.generateImage.fail', {
+      ...summarizeImageGenerationOptions(options),
+      error: keyCheck.error
+    })
     return {
       success: false,
       error: keyCheck.error
@@ -1298,6 +1346,13 @@ ipcMain.handle('media:generateImage', async (_event, options: GenerateImageOptio
       if (!result.success) {
         result.error = normalizeUserFacingAiError(result.error)
       }
+      await logEvent(result.success ? 'media.generateImage.success' : 'media.generateImage.fail', {
+        ...summarizeImageGenerationOptions(options),
+        fileName: result.fileName,
+        filePath: result.filePath,
+        fileSize: result.fileSize,
+        error: result.error
+      })
       return result
     }
 
@@ -1500,6 +1555,13 @@ ipcMain.handle('media:generateImage', async (_event, options: GenerateImageOptio
     if (!result.success) {
       result.error = normalizeUserFacingAiError(result.error)
     }
+    await logEvent(result.success ? 'media.generateImage.success' : 'media.generateImage.fail', {
+      ...summarizeImageGenerationOptions(options),
+      fileName: result.fileName,
+      filePath: result.filePath,
+      fileSize: result.fileSize,
+      error: result.error
+    })
     return result
   } catch (error: any) {
     console.error('[ImageGen] ========== 生成失败(外层catch) ==========')
@@ -1851,6 +1913,7 @@ ipcMain.handle('storyboard:generateShot', async (_event, options: {
   if (!manifest) throw new Error('Storyboard not found')
   const shot = manifest.shots.find(item => item.index === options.shotIndex)
   if (!shot) throw new Error('Storyboard shot not found')
+
 
   shot.status = 'generating'
   shot.prompt = options.prompt
@@ -2281,6 +2344,10 @@ ipcMain.handle('media:generateVideo', async (_event, options: GenerateVideoOptio
   const progressId = `video:${Date.now()}`
   const abortController = new AbortController()
   const provider = options.provider || runtimeSettings.defaultVideoProvider || 'ark'
+  await logEvent('media.generateVideo.start', {
+    ...summarizeVideoGenerationOptions(options),
+    progressId
+  })
   activeVideoGenerationSession = {
     progressId,
     provider,
@@ -2288,6 +2355,11 @@ ipcMain.handle('media:generateVideo', async (_event, options: GenerateVideoOptio
   }
   if (provider !== 'ark') {
     activeVideoGenerationSession = null
+    await logEvent('media.generateVideo.fail', {
+      ...summarizeVideoGenerationOptions(options),
+      progressId,
+      error: `${provider} video generation is not available`
+    })
     return { success: false, error: `${provider} video generation is configured but not available in this local adapter yet. Use Ark for video generation.` }
   }
   // 检查 API Key 是否已配置
@@ -2295,6 +2367,11 @@ ipcMain.handle('media:generateVideo', async (_event, options: GenerateVideoOptio
   if (!keyCheck.configured) {
     console.error('[VideoGen] API Key 未配置')
     activeVideoGenerationSession = null
+    await logEvent('media.generateVideo.fail', {
+      ...summarizeVideoGenerationOptions(options),
+      progressId,
+      error: keyCheck.error
+    })
     return {
       success: false,
       error: keyCheck.error
@@ -2305,6 +2382,11 @@ ipcMain.handle('media:generateVideo', async (_event, options: GenerateVideoOptio
   const modelConfig = getVolcVideoModelConfig(options.model)
   if (!modelConfig) {
     activeVideoGenerationSession = null
+    await logEvent('media.generateVideo.fail', {
+      ...summarizeVideoGenerationOptions(options),
+      progressId,
+      error: `Unsupported video model: ${options.model}`
+    })
     return {
       success: false,
       error: `不支持的视频模型: ${options.model}`
@@ -2547,6 +2629,14 @@ ipcMain.handle('media:generateVideo', async (_event, options: GenerateVideoOptio
 
       sendTaskProgress({ id: progressId, taskType: 'video', status: 'completed', progress: 100, message: '视频生成完成' })
 
+      await logEvent('media.generateVideo.success', {
+        ...summarizeVideoGenerationOptions(options),
+        progressId,
+        taskId,
+        filePath: downloadResult.filePath,
+        fileSize: downloadResult.fileSize,
+        duration
+      })
       return {
         success: true,
         videoUrl: videoUrl,
@@ -2559,6 +2649,14 @@ ipcMain.handle('media:generateVideo', async (_event, options: GenerateVideoOptio
       console.error('[VideoGen] 视频下载失败:', downloadError)
       sendTaskProgress({ id: progressId, taskType: 'video', status: 'completed', progress: 100, message: '视频已生成，但下载本地失败' })
       // 即使下载失败，也返回URL
+      await logEvent('media.generateVideo.success', {
+        ...summarizeVideoGenerationOptions(options),
+        progressId,
+        taskId,
+        fileName,
+        localDownloadFailed: true,
+        error: downloadError?.message || String(downloadError)
+      })
       return {
         success: true,
         videoUrl: videoUrl,
@@ -3211,6 +3309,9 @@ const startDevBridgeServer = () => {
           await shell.openPath(body.dirPath)
           sendBridgeJson(res, 200, true, origin)
           return
+        case '/logs/flush':
+          sendBridgeJson(res, 200, await flushLogs('manual'), origin)
+          return
         case '/storyboard/scan':
           sendBridgeJson(res, 200, await scanStoryboardsData(bridgeAssetUrl), origin)
           return
@@ -3314,6 +3415,19 @@ app.whenReady().then(async () => {
   }
 
   // 初始化目录
+  await initializeLogging({
+    appName: 'cinecho-local',
+    version: app.getVersion(),
+    logDir: join(app.getPath('userData'), 'logs'),
+    getUploadConfig: () => runtimeSettings.logUpload
+  })
+  await logEvent('app.start', {
+    packaged: app.isPackaged,
+    platform: process.platform,
+    outputDir: fileNameOnly(outputDir),
+    logUploadConfigured: Boolean(runtimeSettings.logUpload?.url || process.env.CINECHO_LOG_UPLOAD_URL)
+  })
+
   await initializeDirectories()
 
   startDevBridgeServer()
@@ -3326,6 +3440,21 @@ app.whenReady().then(async () => {
       createWindow()
     }
   })
+})
+
+let quitAfterLogFlush = false
+
+app.on('before-quit', (event) => {
+  if (quitAfterLogFlush) return
+  event.preventDefault()
+  quitAfterLogFlush = true
+  Promise.resolve()
+    .then(() => logEvent('app.close.requested', { source: 'before-quit' }))
+    .then(() => flushLogs('before-quit'))
+    .catch((error) => {
+      console.warn('[Logging] Failed to flush logs before quit:', error instanceof Error ? error.message : String(error))
+    })
+    .finally(() => app.quit())
 })
 
 app.on('window-all-closed', () => {
