@@ -33,6 +33,13 @@ yarn-error.log*
 # Generated reference assets
 分镜参考/
 
+# Generated media assets (user-created content, not source code)
+costumes/
+roles/
+scenes/
+storyboards/
+videos/
+
 # OS generated files
 .DS_Store
 Thumbs.db
