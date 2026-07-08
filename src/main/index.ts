@@ -44,13 +44,12 @@ let outputDir = join(app.getPath('documents'), 'Cinecho', 'Assets')
 
 const APIMART_PROVIDER = 'apimart'
 const APIMART_BASE_URL = 'api.apimart.ai'
-const APIMART_API_KEY = 'REDACTED_API_KEY'
 const APIMART_IMAGE_MODELS = ['gpt-image-2', 'gemini-3-pro-image-preview', 'gemini-3-pro-image-preview-official']
 const getApimartBearerKey = (apiKey: string) => apiKey.startsWith('apimart:') ? apiKey.slice('apimart:'.length) : apiKey
 
 const DEFAULT_SETTINGS = {
   outputDir,
-  apiKeys: { [APIMART_PROVIDER]: APIMART_API_KEY } as Record<string, string>,
+  apiKeys: {} as Record<string, string>,
   defaultTextProvider: 'ark',
   defaultImageProvider: APIMART_PROVIDER,
   defaultVideoProvider: 'ark',
@@ -791,7 +790,6 @@ const updateStoreSettings = async (settings: any) => {
 const getEffectiveApiKey = (provider = 'ark'): string => {
   const key = runtimeSettings?.apiKeys?.[provider]
   if (key) return key
-  if (provider === APIMART_PROVIDER) return APIMART_API_KEY
   return provider === 'ark' ? userApiKey : ''
 }
 

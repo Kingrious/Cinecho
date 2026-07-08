@@ -18,6 +18,11 @@ dist/
 .env
 .env.*
 
+# API keys and secrets
+api文档/api密钥
+*.key
+*.secret
+
 # Logs
 logs
 *.log
